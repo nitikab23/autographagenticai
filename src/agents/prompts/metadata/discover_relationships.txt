@@ -1,0 +1,40 @@
+# Relationship Discovery Prompt
+Analyze these database tables and identify potential join relationships:
+
+**Tables**:
+```json
+{metadata}
+```
+
+**Guidelines**:
+1. Match columns with similar names/data types
+2. Prioritize foreign key relationships
+3. Identify both explicit and implicit relationships
+4. Include cardinality estimates
+5. Note any ambiguous relationships
+
+**Response Format**:
+```json
+{
+  "relationships": [
+    {
+      "tables": ["table1", "table2"],
+      "columns": [
+        {"table": "table1", "column": "id"},
+        {"table": "table2", "column": "table1_id"}
+      ],
+      "confidence": 0.9,
+      "type": "foreign_key",
+      "description": "One-to-many relationship between table1 and table2"
+    }
+  ],
+  "ambiguous_candidates": [
+    {
+      "tables": ["tableA", "tableB"],
+      "possible_columns": [
+        {"table": "tableA", "column": "created_date"},
+        {"table": "tableB", "column": "timestamp"}  
+      ]
+    }
+  ]
+}

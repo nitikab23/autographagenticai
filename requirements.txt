@@ -1,0 +1,27 @@
+# Trino Connection Dependencies
+trino==0.329.0  # Latest as of late 2024, assumes minor updates
+sqlalchemy==2.0.35  # Latest, supports trino and langchain
+cryptography==43.0.3  # Latest, minor updates expected
+urllib3==2.2.3  # Latest, minor updates
+uuid6==2023.5.2  # No significant updates, kept stable
+
+# API Dependencies
+fastapi==0.115.2  # Latest, supports pydantic>=2
+uvicorn==0.32.0  # Latest, aligns with fastapi
+
+# Machine Learning and NLP
+pydantic==2.9.2  # Latest, compatible with fastapi, langchain, mistralai
+langchain==0.3.3  # Latest stable, supports pydantic>=2 and sqlalchemy>=2
+openai==1.12.0
+cachetools==5.5.0
+
+# Data Processing
+pandas==2.2.3  # Latest, minor updates
+numpy==1.26.4  # Latest, aligns with pandas
+
+# Development and Testing
+pytest==8.3.3  # Latest, minor updates
+mypy==1.13.0  # Latest, supports modern python
+black==24.8.0  # Latest, formatting updates
+isort==5.13.2  # Latest, minor updates
+psycopg2-binary>=2.9.9
