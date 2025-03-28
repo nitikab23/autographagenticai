@@ -1,29 +1,41 @@
 from typing import Dict, Any
 import json
 import logging
+import os
 from tenacity import retry, stop_after_attempt, wait_exponential
 from openai import OpenAI
 from src.agents.core import Agent, ReasoningStep
 from src.agents.context import ContextProtocol
-from src.metadata_management.metadata_store import MetadataStore
+from src.project_management.project_manager import ProjectManager
+from google import genai
+from google.genai import types
+from dotenv import load_dotenv
 
 class MetadataAgent(Agent):
     """LLM-driven metadata analysis with context-aware processing"""
     
     def __init__(self, context: ContextProtocol):
         super().__init__(context)
+        load_dotenv()
+        
+        gemini_api_key = os.getenv('GEMINI_API_KEY')
+        if not gemini_api_key:
+            raise ValueError("GEMINI_API_KEY environment variable is not set")
+            
         from src.project_management.project_manager import ProjectManager
-        self.metadata_store = MetadataStore(
+        self.project_manager = ProjectManager(
             storage_path="storage/metadata/"
         )
-        self.client = OpenAI()
+        self.client = genai.Client(
+            api_key=gemini_api_key,
+        )
         self._load_prompts()
 
     async def execute(self) -> ReasoningStep:
         """Execute metadata analysis"""
         try:
-            metadata = self.metadata_store.get_project_metadata(self.context.project_id)
-            if not metadata:
+            metadata = self.project_manager.get_project_metadata(self.context.project_id)
+            if not metadata.get('tables'):
                 return ReasoningStep(
                     agent="MetadataAgent",
                     operation="error",
@@ -54,32 +66,24 @@ class MetadataAgent(Agent):
     async def analyze(self, query: str, project_id: str, context: ContextProtocol, raw_metadata: Dict) -> Dict:
         """Analyze metadata using LLM"""
         try:
-            # Convert metadata and context to strings to avoid JSON formatting issues
             metadata_str = json.dumps(raw_metadata, indent=2)
             context_str = json.dumps(context.to_json(), indent=2)
             
-            # Format the prompt template with the actual values
             formatted_prompt = self.analyze_prompt.format(
                 query=query,
                 metadata=metadata_str,
                 context=context_str
             )
-
-            # Execute the prompt with OpenAI using synchronous API
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini-2024-07-18",
-                messages=[
-                    {"role": "system", "content": "You are a data analysis assistant. Always respond with valid JSON."},
-                    {"role": "user", "content": formatted_prompt}
-                ],
-                temperature=0.3,
-                max_tokens=1000
+            response = self.client.models.generate_content(
+                model="gemini-2.5-pro-exp-03-25",
+                contents=[formatted_prompt]
             )
-
-            # Extract the response content
-            result = response.choices[0].message.content
-            return json.loads(result)
-
+            self.logger.debug(f"Raw API Response: {response}")
+            content = response.candidates[0].content.parts[0].text
+            content = content.replace("```json", "").replace("```", "").strip()
+            
+            # Parse to dict for consistency
+            return json.loads(content)
         except Exception as e:
             self.logger.error(f"Metadata analysis failed: {str(e)}")
             raise

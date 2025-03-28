@@ -20,8 +20,8 @@ logging.basicConfig(
 )
 
 async def test_metadata_agent():
-    query = "Compare rental growth rates between stores"
-    project_id = "0bdd6227-2f34-4dfc-8165-09b23cb53e49"
+    query = "Provide total revenue by category and actor"
+    project_id = "0d9e2c6f-5e1b-44ba-939f-32b584161b7b"
 
     # Verify project directory exists
     project_dir = Path("storage/metadata/projects") / project_id

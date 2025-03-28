@@ -1,7 +1,7 @@
 import os
 import json
-from datetime import datetime
-from typing import Dict, List, Any, Optional
+from datetime import datetime, timezone
+from typing import Dict, List, Any, Optional, Tuple
 import logging
 import uuid
 
@@ -14,8 +14,9 @@ class Project:
         self.name = name
         self.description = description
         self.skip_llm = skip_llm
-        self.created_at = datetime.utcnow().isoformat()
-        self.updated_at = self.created_at
+        current_time = datetime.now(timezone.utc).isoformat()
+        self.created_at = current_time
+        self.updated_at = current_time
         self.data_sources = []
         self.data_sources_count = 0
         self.metadata_store = metadata_store
@@ -34,7 +35,9 @@ class Project:
 
 class ProjectManager:
     def __init__(self, storage_path: str):
+        # Current issue: Inconsistent path joining
         self.storage_path = os.path.join(storage_path, "projects")
+        # Should standardize path handling across all methods
         self.logger = logging.getLogger(__name__)
         os.makedirs(self.storage_path, exist_ok=True)
 
@@ -58,13 +61,28 @@ class ProjectManager:
 
     def get_project(self, project_id: str) -> Dict[str, Any]:
         """Get project details by ID"""
+        if not project_id:
+            raise ValueError("Project ID cannot be empty")
+            
         try:
             project_file = os.path.join(self.storage_path, project_id, "project.json")
             if not os.path.exists(project_file):
                 raise FileNotFoundError(f"Project {project_id} not found")
             
             with open(project_file, 'r') as f:
-                return json.load(f)
+                project_data = json.load(f)
+                
+            # Validate required fields
+            required_fields = ['id', 'name', 'description', 'created_at']
+            missing_fields = [field for field in required_fields if field not in project_data]
+            if missing_fields:
+                raise ValueError(f"Project data missing required fields: {missing_fields}")
+                
+            return project_data
+            
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Invalid JSON in project file: {str(e)}")
+            raise ValueError(f"Project file contains invalid JSON: {str(e)}")
         except Exception as e:
             self.logger.error(f"Failed to get project: {str(e)}")
             raise
@@ -112,8 +130,24 @@ class ProjectManager:
             self.logger.error(f"Failed to update project: {str(e)}")
             raise
 
-    def update_tables_metadata(self, project_id: str, table_key: str, metadata: Dict[str, Any]) -> None:
-        """Update tables metadata for a project"""
+    def update_tables_metadata(
+        self, 
+        project_id: str, 
+        table_key: str, 
+        metadata: Dict[str, Any]
+    ) -> None:
+        """Update tables metadata for a project
+        
+        Args:
+            project_id: Unique identifier of the project
+            table_key: Unique identifier of the table
+            metadata: Dictionary containing table metadata
+            
+        Raises:
+            FileNotFoundError: If project directory doesn't exist
+            ValueError: If metadata is invalid
+            IOError: If file operations fail
+        """
         try:
             metadata_file = os.path.join(self.storage_path, project_id, "tables_metadata.json")
             
@@ -181,6 +215,7 @@ class ProjectManager:
                 project_data['data_sources'] = []
             
             project_data['data_sources'].append(data_source)
+            project_data['data_sources_count'] = len(project_data['data_sources'])
             project_data['updated_at'] = datetime.utcnow().isoformat()
             
             # Save updated project data
@@ -199,3 +234,31 @@ class ProjectManager:
                 'status': 'error',
                 'error': str(e)
             }
+
+    def get_project_metadata(self, project_id: str) -> Dict[str, Any]:
+        """Get consolidated metadata for a project including all its data sources"""
+        try:
+            # Get project details
+            project_data = self.get_project(project_id)
+            if not project_data:
+                raise ValueError(f"Project {project_id} not found")
+
+            # Get tables metadata
+            metadata_file = os.path.join(self.storage_path, project_id, "tables_metadata.json")
+            tables_metadata = {}
+            if os.path.exists(metadata_file):
+                with open(metadata_file, 'r') as f:
+                    tables_metadata = json.load(f)
+
+            return {
+                'project_id': project_id,
+                'project_name': project_data.get('name'),
+                'project_description': project_data.get('description'),
+                'data_sources': project_data.get('data_sources', []),
+                'tables': tables_metadata,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+
+        except Exception as e:
+            self.logger.error(f"Failed to get project metadata: {str(e)}")
+            raise

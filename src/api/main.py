@@ -6,6 +6,13 @@ from typing import List, Dict, Optional
 
 from src.core.service_layer import ApplicationService
 from src.metadata_management.metadata_store import MetadataStore  # Add if needed
+from src.agents.context import ContextProtocol
+from src.agents.core import CoordinatorAgent
+
+# Add new Pydantic model for query requests
+class QueryRequest(BaseModel):
+    query: str
+    project_id: str
 
 # Application state
 class AppState:
@@ -201,3 +208,35 @@ def get_table_metadata_batch(
         connection_id=connection_id,
         tables=tables
     )
+
+@app.post("/analyze")
+async def analyze_query(
+    request: QueryRequest,
+    service: ApplicationService = Depends(get_service)
+):
+    """
+    Analyze a query using metadata agents
+    """
+    try:
+        # Verify project exists
+        project = service.get_project(request.project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Create context with project ID
+        context = ContextProtocol(
+            query=request.query,
+            project_id=request.project_id
+        )
+        
+        # Initialize and execute coordinator agent
+        coordinator = CoordinatorAgent(context)
+        result = await coordinator.execute()
+        
+        return {
+            "status": "success",
+            "result": result,
+            "context": context.snapshot()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -12,8 +12,9 @@ uvicorn==0.32.0  # Latest, aligns with fastapi
 # Machine Learning and NLP
 pydantic==2.9.2  # Latest, compatible with fastapi, langchain, mistralai
 langchain==0.3.3  # Latest stable, supports pydantic>=2 and sqlalchemy>=2
-openai==1.12.0
+openai==1.69.0  # Updated to support O3-mini parameters
 cachetools==5.5.0
+google-genai==1.8.0
 
 # Data Processing
 pandas==2.2.3  # Latest, minor updates
