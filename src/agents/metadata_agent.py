@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import json
 import logging
 import os
@@ -14,8 +14,9 @@ from dotenv import load_dotenv
 class MetadataAgent(Agent):
     """LLM-driven metadata analysis with context-aware processing"""
     
-    def __init__(self, context: ContextProtocol):
+    def __init__(self, context: ContextProtocol, clarifications: Optional[Dict[str, str]] = None):
         super().__init__(context)
+        self.clarifications = clarifications
         load_dotenv()
         
         gemini_api_key = os.getenv('GEMINI_API_KEY')
@@ -46,7 +47,8 @@ class MetadataAgent(Agent):
                 query=self.context.query,
                 project_id=self.context.project_id,
                 context=self.context,
-                raw_metadata=metadata
+                raw_metadata=metadata,
+                clarifications=self.clarifications # Pass clarifications here
             )
 
             return ReasoningStep(
@@ -63,16 +65,23 @@ class MetadataAgent(Agent):
                 details={"error": str(e)}
             )
 
-    async def analyze(self, query: str, project_id: str, context: ContextProtocol, raw_metadata: Dict) -> Dict:
-        """Analyze metadata using LLM"""
+    async def analyze(self, query: str, project_id: str, context: ContextProtocol, raw_metadata: Dict, clarifications: Optional[Dict[str, str]] = None) -> Dict:
+        """Analyze metadata using LLM, incorporating user clarifications"""
         try:
             metadata_str = json.dumps(raw_metadata, indent=2)
             context_str = json.dumps(context.to_json(), indent=2)
             
+            # Format clarifications for the prompt
+            clarifications_str = "No clarifications provided."
+            if clarifications:
+                clarifications_list = [f"- {q}: {a}" for q, a in clarifications.items()]
+                clarifications_str = "User provided the following clarifications:\n" + "\n".join(clarifications_list)
+
             formatted_prompt = self.analyze_prompt.format(
                 query=query,
                 metadata=metadata_str,
-                context=context_str
+                context=context_str,
+                clarifications=clarifications_str # Add clarifications to prompt formatting
             )
             response = self.client.models.generate_content(
                 model="gemini-2.5-pro-exp-03-25",
@@ -97,10 +106,12 @@ class MetadataAgent(Agent):
                 self.relationship_prompt = f.read().strip()
             
             # Validate that the prompt contains the expected placeholders
+            # Update validation to include the new clarifications placeholder
             test_format = self.analyze_prompt.format(
                 query="test",
                 metadata={},
-                context="{}"
+                context="{}",
+                clarifications="test clarifications"
             )
             self.logger.debug("Successfully loaded and validated prompt templates")
             

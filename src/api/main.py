@@ -13,6 +13,7 @@ from src.agents.core import CoordinatorAgent
 class QueryRequest(BaseModel):
     query: str
     project_id: str
+    clarifications: Optional[Dict[str, str]] = None  # Simple key-value store for clarifications
 
 # Application state
 class AppState:
@@ -214,24 +215,31 @@ async def analyze_query(
     request: QueryRequest,
     service: ApplicationService = Depends(get_service)
 ):
-    """
-    Analyze a query using metadata agents
-    """
+    """Analyze a query using metadata agents"""
     try:
         # Verify project exists
         project = service.get_project(request.project_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        # Create context with project ID
+        # Create context with project ID and any clarifications
         context = ContextProtocol(
             query=request.query,
-            project_id=request.project_id
+            project_id=request.project_id,
+            clarifications=request.clarifications
         )
         
         # Initialize and execute coordinator agent
         coordinator = CoordinatorAgent(context)
         result = await coordinator.execute()
+        
+        # Check if clarification is needed
+        if result.operation == "clarification_needed":
+            return {
+                "status": "clarification_needed",
+                "clarifications": result.details["ambiguities"],
+                "context": context.snapshot()
+            }
         
         return {
             "status": "success",

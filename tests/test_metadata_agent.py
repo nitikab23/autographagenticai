@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 
 async def test_metadata_agent():
-    query = "Provide total revenue by category and actor"
+    query = "List top 3 actors by total revenue for comedies in the last 6 months"
     project_id = "0d9e2c6f-5e1b-44ba-939f-32b584161b7b"
 
     # Verify project directory exists
