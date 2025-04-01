@@ -17,27 +17,11 @@ logging.basicConfig(
 )
 
 async def test_metadata_agent():
-    query = "Provide total revenue by category and actor"
+    query = "Count rentals for every store and film title"
     project_id = "0d9e2c6f-5e1b-44ba-939f-32b584161b7b"
 
     project_dir = Path("storage/metadata/projects") / project_id
-    metadata_path = project_dir / "tables_metadata.json"
-    if not metadata_path.exists():
-        project_dir.mkdir(parents=True, exist_ok=True)
-        dummy_metadata = {
-            "tables": {
-                "postgresql.public.actor": {"columns": {"actor_id": "integer", "first_name": "varchar", "last_name": "varchar"}},
-                "postgresql.public.film_actor": {"columns": {"actor_id": "integer", "film_id": "integer"}},
-                "hive.rentals_db.inventory": {"columns": {"inventory_id": "integer", "film_id": "integer"}},
-                "hive.rentals_db.rental": {"columns": {"rental_id": "integer", "inventory_id": "integer"}},
-                "hive.rentals_db.payment": {"columns": {"rental_id": "integer", "amount": "double", "payment_date": "timestamp"}},
-                "postgresql.public.film_category": {"columns": {"film_id": "integer", "category_id": "integer"}},
-                "postgresql.public.category": {"columns": {"category_id": "integer", "name": "varchar"}}
-            }
-        }
-        with open(metadata_path, "w") as f:
-            json.dump(dummy_metadata, f)
-        print(f"Created dummy metadata at: {metadata_path}")
+    #metadata_path = project_dir / "tables_metadata.json"
 
     context = ContextProtocol(query=query, project_id=project_id)
     coordinator = CoordinatorAgent(context)

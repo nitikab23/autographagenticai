@@ -23,13 +23,11 @@ class MetadataAgent(Agent):
     async def execute(self) -> ReasoningStep:
         try:
             metadata = self.project_manager.get_project_metadata(self.context.project_id)
-            if not metadata.get("tables"):
-                return ReasoningStep(
-                    agent="MetadataAgent",
-                    operation="error",
-                    details={"error": f"No metadata for project {self.context.project_id}"}
-                )
+            self.logger.debug(f"Raw metadata from project manager: {json.dumps(metadata, indent=2)}")
+            if not metadata.get("tables") and not metadata.get("columns"):
+                self.logger.warning("Project metadata is empty, relying on LLM output")
             result = await self.analyze(self.context.query, metadata)
+            self.logger.debug(f"Post-analysis result: {json.dumps(result, indent=2)}")
             return ReasoningStep(
                 agent="MetadataAgent",
                 operation="metadata_analysis",
@@ -55,13 +53,14 @@ class MetadataAgent(Agent):
             context=context_str,
             clarifications=clarifications_str
         )
-        self.logger.debug(f"Generated prompt:\n{prompt}")
         response = self.client.models.generate_content(
             model="gemini-2.5-pro-exp-03-25",
             contents=[prompt]
         )
+        self.logger.debug(f"Response: {response}")
         content = response.candidates[0].content.parts[0].text.strip("```json\n")
         result = json.loads(content)
+        self.logger.debug(f"Result: {result}")
 
         # Minimal validation and cleanup
         if "ambiguities" in result and self.clarifications:
@@ -74,39 +73,98 @@ class MetadataAgent(Agent):
         return result
 
     def _validate_result(self, result: Dict, metadata: Dict):
-        # Use inner structure if "tables" exists; otherwise, use metadata directly.
-        meta = metadata.get("tables", metadata)
+        # Ensure all expected keys are present
+        expected_keys = {"tables", "columns", "joins", "filters", "drill_down", "ambiguities"}
+        for key in expected_keys:
+            if key not in result:
+                result[key] = [] if key != "columns" else {}
+                if key == "drill_down":
+                    result[key] = {"levels": []}
+
+        # Get metadata columns if available
         all_meta_cols = {
             f"{table}.{col['name']}": col
-            for table, table_meta in meta.items()
-            for col in table_meta.get("columns", [])
+            for table, cols in metadata.get("columns", {}).items()
+            for col in cols
         }
-        for table, cols in result["columns"].items():
+        all_meta_tables = set(metadata.get("tables", []))
+        self.logger.debug(f"Metadata columns: {list(all_meta_cols.keys())}")
+
+        # Validate columns, preserving LLM output unless overridden by metadata
+        for table in list(result["columns"].keys()):
+            if all_meta_tables and table not in all_meta_tables:
+                self.logger.warning(f"Table {table} not in metadata.tables, removing")
+                del result["columns"][table]
+                continue
+            cols = result["columns"][table]
+            validated_cols = []
             for col in cols:
                 full_name = f"{table}.{col['name']}"
-                if full_name not in all_meta_cols:
-                    self.logger.warning(f"Column {full_name} not in metadata, removing")
-                    cols.remove(col)
-                elif col != all_meta_cols[full_name]:
-                    cols[cols.index(col)] = all_meta_cols[full_name]
+                if full_name in all_meta_cols:
+                    validated_cols.append(all_meta_cols[full_name])  # Prefer metadata version
+                    self.logger.debug(f"Using metadata column for {full_name}")
+                else:
+                    validated_cols.append(col)  # Keep LLM version if metadata lacks it
+                    self.logger.debug(f"Keeping LLM column {full_name}")
+            result["columns"][table] = validated_cols
 
-        # Check drill_down and filters
+        # Validate joins, preserving LLM output unless invalid
+        validated_joins = []
+        for join in result["joins"]:
+            if not isinstance(join, dict) or not all(k in join for k in ["left_table", "left_column", "right_table", "right_column"]):
+                self.logger.warning(f"Invalid join format: {join}, skipping")
+                continue
+            left_col = join["left_column"].split(".")[-1] if "." in join["left_column"] else join["left_column"]
+            right_col = join["right_column"].split(".")[-1] if "." in join["right_column"] else join["right_column"]
+            left_full_col = f"{join['left_table']}.{left_col}"
+            right_full_col = f"{join['right_table']}.{right_col}"
+            # Only skip if metadata exists and join is completely invalid
+            if all_meta_cols and (
+                join["left_table"] not in all_meta_tables or
+                join["right_table"] not in all_meta_tables or
+                (left_full_col not in all_meta_cols and right_full_col not in all_meta_cols)
+            ):
+                self.logger.warning(f"Join columns {left_full_col} or {right_full_col} not in metadata, skipping")
+                continue
+            join_type = join.get("type", "LEFT")  # Default to LEFT, respect LLM type if provided
+            validated_joins.append({
+                "left_table": join["left_table"],
+                "left_column": left_col,
+                "right_table": join["right_table"],
+                "right_column": right_col,
+                "type": join_type
+            })
+        result["joins"] = validated_joins
+
+        # Validate drill_down, preserving expressions and columns
         for level in result["drill_down"]["levels"]:
+            validated_cols = []
             for col in level["columns"]:
-                if " AS " in col or "||" in col:
-                    continue  # Allow expressions
-                base_col = col.split(".")[-1]
+                if " AS " in col or "||" in col or "CONCAT" in col:  # Allow expressions
+                    validated_cols.append(col)
+                    continue
                 table = ".".join(col.split(".")[:-1])
-                if col not in all_meta_cols and not any(c["name"] == base_col for c in result["columns"].get(table, [])):
-                    self.logger.warning(f"Drill-down column {col} not in columns, adding")
-                    if col in all_meta_cols:
-                        result["columns"].setdefault(table, []).append(all_meta_cols[col])
+                base_col = col.split(".")[-1]
+                full_name = f"{table}.{base_col}"
+                if all_meta_cols and full_name in all_meta_cols:
+                    validated_cols.append(col)
+                    if not any(c["name"] == base_col for c in result["columns"].get(table, [])):
+                        self.logger.debug(f"Adding drill-down column {full_name} to columns")
+                        result["columns"].setdefault(table, []).append(all_meta_cols[full_name])
+                else:
+                    validated_cols.append(col)  # Keep LLM version
+                    self.logger.debug(f"Keeping drill-down column {full_name}")
+            level["columns"] = validated_cols
 
-        for filt in result["filters"]:
-            col = filt["column"]
-            if col not in all_meta_cols:
-                self.logger.warning(f"Filter column {col} not in metadata, removing")
-                result["filters"].remove(filt)
+        # Validate filters
+        result["filters"] = [
+            filt for filt in result["filters"]
+            if isinstance(filt, dict) and (not all_meta_cols or filt.get("column") in all_meta_cols)
+        ]
+
+        # Ensure tables align only if metadata.tables exists
+        if all_meta_tables:
+            result["tables"] = [t for t in result["tables"] if t in all_meta_tables]
 
     def _load_prompts(self):
         try:
