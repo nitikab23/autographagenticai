@@ -26,22 +26,16 @@ You are a senior data analyst processing a business intelligence query for a Tri
    - Specify each join with `left_table`, `left_column`, `right_table`, `right_column`.
    - Flag uncertain joins as ambiguities.
 
-5. **Specify Aggregations:**
-   - Define `metrics` as: `function` (e.g., SUM, COUNT), `column` (fully qualified), `alias`, optional `expression`.
-   - List `group_by` fields as columns or expressions, including unique IDs where applicable; default to minimal fields (e.g., ID or primary descriptor) unless additional descriptive fields are explicitly needed for visualization.
-   - Include `ranking` if ordering is implied (e.g., "top" implies DESC).
-
-6. **Identify Filters:**
+5. **Identify Filters:**
    - List explicit filters from the query.
-   - Suggest `suggested_filters` with `column`, `condition`, `reason` (e.g., time range, data quality).
 
-7. **Specify Drill-Down Levels:**
+6. **Specify Drill-Down Levels:**
    - Identify dimensions directly referenced in the query (e.g., entities in "by" clauses) as separate levels, up to two, using essential fields (e.g., ID or primary descriptor).
    - Add one visualization enhancer from metadata: a temporal field for transactional queries (e.g., involving revenue or rentals), or a categorical field for static queries (e.g., involving counts or lists), unless the query or metadata excludes such dimensions; use essential fields only.
    - Structure each level as an object with `name` and `columns`, where `columns` are fully qualified fields or expressions tailored to the dimension’s role (e.g., truncation for temporal fields).
    - Limit to three levels total unless fewer dimensions apply.
 
-8. **Use Prior Context and Clarifications:**
+7. **Use Prior Context and Clarifications:**
    - Refine analysis using prior context (e.g., previous steps) and any user clarifications provided for ambiguities. Ensure the final analysis reflects these inputs.
 
 **Output:**
@@ -49,8 +43,6 @@ Respond with a valid JSON object containing:
 - `tables`: Array of fully qualified table names.
 - `columns`: Object mapping each table to an array of column objects, where each column object has `name` (fully qualified), `type` (from metadata), and `nullable` (from metadata).
 - `joins`: Array of join conditions with `left_table`, `left_column`, `right_table`, `right_column`.
-- `aggregations`: Object with `metrics`, `group_by`, `ranking`.
 - `filters`: Array of explicit conditions.
-- `suggested_filters`: Array with `column`, `condition`, `reason`.
 - `drill_down`: Object with `levels` array, each with `name` and `columns`.
 - `ambiguities`: Array with `question` and `suggestion`.
