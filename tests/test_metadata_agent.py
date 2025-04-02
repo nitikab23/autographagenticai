@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 
 async def test_metadata_agent():
-    query = "Count rentals for every store and film title"
+    query = "Profile our high-value customers based on recent activity. Show the top customers overall, ranked by their total spending. For these customers, display their full name, total amount spent, number of rentals, average spend per rental, and the main categories they rent from. Consider only activity from the last year available in the data. Ensure the analysis reflects all customer interactions."
     project_id = "0d9e2c6f-5e1b-44ba-939f-32b584161b7b"
 
     project_dir = Path("storage/metadata/projects") / project_id
