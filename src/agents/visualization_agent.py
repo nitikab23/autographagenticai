@@ -1,6 +1,7 @@
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+# import matplotlib.pyplot as plt # Removed
+# import seaborn as sns # Removed
+import plotly.express as px # Added
 import os
 import re # Added for parsing LLM response
 import io # Added for capturing df.info() output
@@ -9,6 +10,9 @@ from src.agents.core import Agent, ReasoningStep
 from src.agents.context import ContextProtocol
 from google import genai
 from dotenv import load_dotenv # Added dotenv
+from google.genai import types
+from openai import OpenAI
+
 
 # Load environment variables
 load_dotenv()
@@ -20,10 +24,13 @@ class VisualizationAgent(Agent):
         # Consider making the model name configurable
         try:
              # Ensure API key is configured before initializing
-             api_key = os.getenv("GEMINI_API_KEY")
+             api_key = os.getenv("DEEPSEEK_API_KEY")
              if not api_key:
-                raise ValueError("GEMINI_API_KEY not set")
-             self.client = genai.Client(api_key=api_key)
+                raise ValueError("DEEPSEEK_API_KEY not set")
+             self.client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.deepseek.com"
+        )
              self.logger.info(f"Initialized Genai Client")
         except Exception as e:
              self.logger.error(f"Failed to initialize Genai Client {e}", exc_info=True)
@@ -56,8 +63,8 @@ class VisualizationAgent(Agent):
                  return ReasoningStep(agent="VisualizationAgent", operation="error", details={"error": error_msg})
 
             # Define visualization path inside the query-specific directory
-            output_image_path = os.path.join(query_output_dir, "visualization.png") # Consistent filename
-            self.logger.info(f"Target output image path: {output_image_path}")
+            output_html_path = os.path.join(query_output_dir, "visualization.html") # Changed variable name and extension
+            self.logger.info(f"Target output HTML path: {output_html_path}")
 
             # 2. Prepare data summary for LLM
             data_head = df.head().to_string()
@@ -75,8 +82,8 @@ class VisualizationAgent(Agent):
                 prompt = prompt_template.format(
                     user_query=user_query,
                     data_head=data_head,
-                    data_info=data_info_str,
-                    output_image_path=output_image_path
+                    data_info=data_info_str
+                    # output_image_path removed as it's not in the new prompt
                 )
                 self.logger.debug(f"Formatted LLM Prompt:\n{prompt}")
             except Exception as e:
@@ -89,21 +96,22 @@ class VisualizationAgent(Agent):
             try:
                 self.logger.info("Calling LLM to generate visualization code...")
                 # Use generate_content for Gemini API
-                response = self.client.models.generate_content(
-            model="gemini-2.5-pro-exp-03-25",
-            contents=[prompt]
-        )
+                response = self.client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[{"role": "user" ,"content" : prompt}],
+            temperature=0.2
+              )
                 # TODO: Add more robust error handling for API responses (e.g., check safety ratings, finish reason)
                 # Access response text correctly based on Gemini API structure
-                matplotlib_code = response.candidates[0].content.parts[0].text
-                self.logger.debug(f"Raw LLM Output:\n{matplotlib_code}")
+                visualization_code = response.choices[0].message.content
+                self.logger.debug(f"Raw LLM Output:\n{visualization_code}")
 
                 # 5. Parse the generated code from the LLM response
-                generated_code = self._parse_code_from_response(matplotlib_code)
+                generated_code = self._parse_code_from_response(visualization_code)
                 if not generated_code:
                      error_msg = "Failed to parse Python code block from LLM response."
-                     self.logger.error(f"{error_msg} Raw response was:\n{matplotlib_code}")
-                     return ReasoningStep(agent="VisualizationAgent", operation="error", details={"error": error_msg, "llm_response": matplotlib_code})
+                     self.logger.error(f"{error_msg} Raw response was:\n{visualization_code}")
+                     return ReasoningStep(agent="VisualizationAgent", operation="error", details={"error": error_msg, "llm_response": visualization_code})
                 self.logger.debug(f"Parsed Generated Code:\n{generated_code}")
 
             except Exception as e:
@@ -115,19 +123,31 @@ class VisualizationAgent(Agent):
             # 6. Execute the generated code
             self.logger.info("Executing LLM-generated visualization code...")
             # IMPORTANT: exec() is dangerous. Ensure the LLM is trusted or sandbox the execution.
-            # Provide necessary context (df, plt, sns, output_image_path) to the exec environment
+            # Provide necessary context (df, px) to the exec environment
             exec_globals = {
                 'pd': pd, # Provide pandas
-                'plt': plt,
-                'sns': sns,
-                'df': df,
-                'output_image_path': output_image_path # Provide the specific output path
+                'px': px, # Provide Plotly Express
+                'df': df
+                # output_path removed, saving handled after exec
             }
             try:
+                 # Execute the code which should define 'fig' in exec_globals
                  exec(generated_code, exec_globals)
-                 self.logger.info(f"Visualization saved to {output_image_path}")
+
+                 # Check if 'fig' was created and generate HTML string
+                 visualization_html = None # Initialize
+                 if 'fig' in exec_globals:
+                     fig = exec_globals['fig']
+                     # Generate HTML string for embedding, include Plotly.js from CDN
+                     visualization_html = fig.to_html(full_html=False, include_plotlyjs='cdn')
+                     self.logger.info(f"Generated Plotly HTML string.")
+                 else:
+                     error_msg = "LLM generated code did not define a 'fig' variable."
+                     self.logger.error(error_msg)
+                     return ReasoningStep(agent="VisualizationAgent", operation="error", details={"error": error_msg, "generated_code": generated_code})
+
             except Exception as e:
-                 error_msg = f"Execution of LLM-generated code failed: {str(e)}"
+                 error_msg = f"Execution of LLM-generated code or saving HTML failed: {str(e)}"
                  self.logger.error(error_msg, exc_info=True)
                  # Include generated code in error details for debugging
                  return ReasoningStep(agent="VisualizationAgent", operation="error", details={"error": error_msg, "generated_code": generated_code})
@@ -139,8 +159,9 @@ class VisualizationAgent(Agent):
                 operation="visualization_generated",
                 details={
                     "input_data_path": query_result_path,
-                    "output_image_path": output_image_path,
+                    "visualization_html": visualization_html, # Add HTML string
                     "executed_code": generated_code # Include for debugging/transparency
+                    # Removed output_html_path
                 }
             )
             self._log_step(result)
@@ -183,8 +204,8 @@ class VisualizationAgent(Agent):
             return match.group(1).strip()
         else:
             # Fallback: Maybe the LLM just returned code without backticks?
-            # Be cautious with this fallback.
-            if "import " in response_text and ("plt." in response_text or "sns." in response_text):
+            # Check for plotly express import/usage
+            if "import plotly.express as px" in response_text and "px." in response_text:
                  self.logger.warning("LLM response did not contain standard Python code block markers (```python). Attempting to use the whole response as code.")
                  return response_text.strip()
             return None # Could not find a code block

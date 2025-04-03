@@ -19,8 +19,7 @@ google-genai==1.8.0
 # Data Processing
 pandas==2.2.3  # Latest, minor updates
 numpy==1.26.4  # Latest, aligns with pandas
-matplotlib==3.9.1 # Added for plotting
-seaborn==0.13.2 # Added for plotting
+plotly==5.17.0 # Added for interactive plotting
 
 # Development and Testing
 pytest==8.3.3  # Latest, minor updates
