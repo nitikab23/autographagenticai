@@ -9,8 +9,9 @@
     <!-- Include Tailwind CSS via CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        #chat-log { height: calc(100vh - 150px); /* Adjust height as needed */ }
+        #chat-log { height: calc(100vh - 150px); overflow-y: auto; overflow-x: visible; /* Adjust height & allow horizontal overflow for tooltips */ }
         /* Style for Plotly chart container */
+        .visualization-container { overflow: visible; /* Allow tooltips to overflow */ }
         .visualization-container .plotly-graph-div { margin: auto; }
         /* Style for code blocks */
         pre code { display: block; white-space: pre-wrap; word-wrap: break-word; }
@@ -21,13 +22,32 @@
         #chat-log::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         /* Tab styling */
         .tab-button.active { border-color: #4f46e5; color: #4f46e5; background-color: #eef2ff; }
-        .tab-content { display: none; }
+        .tab-content { display: none; overflow: visible; /* Allow tooltips to overflow tabs */ }
         .tab-content.active { display: block; }
         /* Ensure table styles apply */
         .data-table table { min-width: 100%; border-collapse: collapse; } /* Added collapse */
         .data-table th { background-color: #f9fafb; padding: 8px 12px; text-align: left; font-weight: 500; color: #6b7280; border-bottom: 1px solid #e5e7eb;}
         .data-table td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; }
         .data-table tr:last-child td { border-bottom: none; } /* Remove border from last row */
+        /* Style for copy/download buttons */
+        .action-button {
+            background-color: #e5e7eb; /* gray-200 */
+            color: #374151; /* gray-700 */
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem; /* text-xs */
+            border: 1px solid #d1d5db; /* gray-300 */
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-top: 8px; /* Add some space above */
+            display: inline-block; /* Align properly */
+        }
+        .action-button:hover { background-color: #d1d5db; /* gray-300 */ }
+        .action-button:active { background-color: #9ca3af; /* gray-400 */ }
+        /* Allow agent result bubbles (containing charts/tabs) to overflow */
+        .agent-result-bubble { overflow: visible; }
+        /* Try to lift Plotly tooltips above other elements */
+        .hovertext { z-index: 9999 !important; }
     </style>
 </head>
 <body class="bg-gray-100 flex flex-col h-screen">
@@ -98,6 +118,7 @@
                     messageDiv.appendChild(textP);
                 } else {
                      messageDiv.appendChild(contentElementOrText); // Append the element (e.g., tab container or loading indicator)
+                     messageDiv.classList.add('agent-result-bubble'); // Add specific class for overflow style
                 }
             }
 
@@ -251,9 +272,43 @@
                 } else if (tab.id === 'summary-only') { // Handle case where only summary exists
                      content.innerHTML = `<p class="text-sm text-gray-700">${escapeHtml(data.visualization_summary)}</p>`;
                 } else if (tab.id === 'data') {
-                    content.innerHTML = `<div class="data-table overflow-x-auto text-xs">${data.data_table_html || '<p>No data table available.</p>'}</div>`;
+                    // Add a container for scrollability and the button
+                    const dataContainer = document.createElement('div');
+                    const tableScrollDiv = document.createElement('div');
+                    tableScrollDiv.classList.add('data-table', 'overflow-auto', 'max-h-96', 'border', 'border-gray-200', 'rounded-md', 'text-xs'); // Added max-h-96 and border/rounded
+                    tableScrollDiv.innerHTML = data.data_table_html || '<p class="p-2">No data table available.</p>';
+                    dataContainer.appendChild(tableScrollDiv);
+
+                    // Add Download CSV button if data exists
+                    if (data.data_table_html) {
+                        const downloadButton = document.createElement('button');
+                        downloadButton.textContent = 'Download CSV';
+                        downloadButton.classList.add('action-button');
+                        downloadButton.onclick = () => downloadCsv(tableScrollDiv.querySelector('table'), `query_result_${messageId}.csv`);
+                        dataContainer.appendChild(downloadButton);
+                    }
+                    content.appendChild(dataContainer);
+
                 } else if (tab.id === 'sql') {
-                    content.innerHTML = `<pre class="bg-gray-800 text-white p-3 rounded-md overflow-x-auto text-xs"><code class="language-sql">${escapeHtml(data.sql_query || 'No SQL query available.')}</code></pre>`;
+                    // Add a container for the code and button
+                    const sqlContainer = document.createElement('div');
+                    const preBlock = document.createElement('pre');
+                    preBlock.classList.add('bg-gray-800', 'text-white', 'p-3', 'rounded-md', 'overflow-x-auto', 'text-xs');
+                    const codeBlock = document.createElement('code');
+                    codeBlock.classList.add('language-sql');
+                    codeBlock.textContent = data.sql_query || 'No SQL query available.'; // Use textContent for raw text
+                    preBlock.appendChild(codeBlock);
+                    sqlContainer.appendChild(preBlock);
+
+                    // Add Copy SQL button if SQL exists
+                    if (data.sql_query) {
+                        const copyButton = document.createElement('button');
+                        copyButton.textContent = 'Copy SQL';
+                        copyButton.classList.add('action-button');
+                        copyButton.onclick = (event) => copySqlToClipboard(codeBlock.textContent, event.target);
+                        sqlContainer.appendChild(copyButton);
+                    }
+                    content.appendChild(sqlContainer);
                 }
 
                 tabButtons.appendChild(button);
@@ -458,8 +513,58 @@
         queryTextarea.addEventListener('focus', () => {
              queryTextarea.style.height = 'auto';
              queryTextarea.style.height = (queryTextarea.scrollHeight) + 'px';
-        });
+         });
 
-    </script>
-</body>
-</html>
+         // --- Helper Functions for Download/Copy ---
+
+         function downloadCsv(tableElement, filename) {
+             if (!tableElement) {
+                 console.error("No table element found for CSV download.");
+                 return;
+             }
+             let csv = [];
+             const rows = tableElement.querySelectorAll("tr");
+
+             // Header row
+             const headerCells = rows[0].querySelectorAll("th");
+             let header = [];
+             headerCells.forEach(cell => header.push(`"${cell.textContent.replace(/"/g, '""')}"`)); // Quote and escape quotes
+             csv.push(header.join(","));
+
+             // Data rows
+             for (let i = 1; i < rows.length; i++) {
+                 const cells = rows[i].querySelectorAll("td");
+                 let row = [];
+                 cells.forEach(cell => row.push(`"${cell.textContent.replace(/"/g, '""')}"`)); // Quote and escape quotes
+                 csv.push(row.join(","));
+             }
+
+             // Create CSV file and trigger download
+             const csvContent = "data:text/csv;charset=utf-8," + csv.join("\n");
+             const encodedUri = encodeURI(csvContent);
+             const link = document.createElement("a");
+             link.setAttribute("href", encodedUri);
+             link.setAttribute("download", filename);
+             document.body.appendChild(link); // Required for Firefox
+             link.click();
+             document.body.removeChild(link);
+         }
+
+         function copySqlToClipboard(sqlText, buttonElement) {
+             if (!navigator.clipboard) {
+                 alert('Clipboard API not available in this browser.');
+                 return;
+             }
+             navigator.clipboard.writeText(sqlText).then(() => {
+                 const originalText = buttonElement.textContent;
+                 buttonElement.textContent = 'Copied!';
+                 setTimeout(() => { buttonElement.textContent = originalText; }, 1500); // Revert after 1.5s
+             }).catch(err => {
+                 console.error('Failed to copy SQL: ', err);
+                 alert('Failed to copy SQL to clipboard.');
+             });
+         }
+
+     </script>
+ </body>
+ </html>
