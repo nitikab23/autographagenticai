@@ -324,11 +324,19 @@ class ApplicationService:
             raise
 
     def cleanup_connections(self):
-        """Cleanup all active connections"""
-        try:
-            self.connection_manager.close_all()
-        except Exception as e:
-            self.logger.error(f"Failed to cleanup connections: {str(e)}")
+        """Cleanup the main active connection manager instance if it exists"""
+        if self.connection_manager: # Check if it was initialized
+            try:
+                self.logger.info("Attempting to cleanup main connection manager instance.")
+                self.connection_manager.close_all()
+                self.logger.info("Main connection manager instance cleaned up.")
+            except Exception as e:
+                self.logger.error(f"Failed to cleanup main connection manager instance: {str(e)}")
+        else:
+            self.logger.info("No main connection manager instance was initialized, skipping cleanup.")
+            # Note: Connections created via get_connection in /analyze are managed per-request
+            # and should ideally be closed within that request scope if necessary,
+            # although Trino connections often handle this gracefully.
 
     def add_data_source(self, project_id: str, connection_id: str, catalog: str, schema: str, tables: Optional[List[str]] = None) -> Dict[str, Any]:
         try:

@@ -43,11 +43,15 @@ Instructions:
         - Use facets (`facet_row`/`facet_col`) for multi-metric breakdowns if suitable.
     e. Limits categories (e.g., top 15 for bar/line) for readability, adjusting based on chart type and query intent, unless specified otherwise.
     f. If data is insufficient (e.g., missing columns), add a comment flagging the issue but attempt a fallback visualization.
-4. **CRITICAL:** Output ONLY the Python code block for the `fig` object.
-    - **DO NOT** include `fig.show()`, `fig.write_html()`, or extraneous code (e.g., data loading).
-    - Final line should be `fig = ...` or a `fig.update_...` call.
+4. **Generate Visualization Summary:** After generating the code, write a concise (2-3 sentences) textual summary highlighting the key insights revealed by the visualization, directly addressing the user's original query. Focus on the main patterns, trends, or comparisons shown.
+5. **CRITICAL Output Format:** Structure your response as follows:
+    a. First, provide ONLY the Python code block required to create the `fig` object, enclosed in triple backticks (```python ... ```).
+        - **DO NOT** include `fig.show()`, `fig.write_html()`, or extraneous code (e.g., data loading).
+        - The final line of the code block should typically be the line that assigns the figure to the `fig` variable (e.g., `fig = px.some_chart(...)`) or a subsequent `fig.update_layout(...)` / `fig.update_traces(...)` call if needed for configuration.
+    b. Immediately after the closing backticks of the code block, add a separator line: `--- SUMMARY ---`
+    c. Following the separator, provide the concise textual summary you generated in step 4.
 
-Example Output:
+Example Output Format:
 ```python
 import plotly.express as px
 import pandas as pd
@@ -66,9 +70,11 @@ fig = px.bar(
 )
 
 fig.update_layout(
-    xaxis_title='Category Name',
-    yaxis_title='Primary Metric',
+    xaxis_title='Category Name Updated',
+    yaxis_title='Primary Metric Updated',
     title_font_size=16,
-    xaxis_tickangle=-45
+    xaxis_tickangle=-45 # Example: Rotating x-axis labels
 )
 ```
+--- SUMMARY ---
+This bar chart shows the top 15 categories ranked by their primary metric value. Category 'A' has the highest value, while the secondary metric (indicated by color) shows a potential inverse relationship in some top categories. Hover over bars for detailed values per category.

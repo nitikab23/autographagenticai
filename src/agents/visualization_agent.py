@@ -5,6 +5,7 @@ import plotly.express as px # Added
 import os
 import re # Added for parsing LLM response
 import io # Added for capturing df.info() output
+import uuid # Added for generating valid div IDs
 from typing import Dict, Any
 from src.agents.core import Agent, ReasoningStep
 from src.agents.context import ContextProtocol
@@ -106,13 +107,22 @@ class VisualizationAgent(Agent):
                 visualization_code = response.choices[0].message.content
                 self.logger.debug(f"Raw LLM Output:\n{visualization_code}")
 
-                # 5. Parse the generated code from the LLM response
-                generated_code = self._parse_code_from_response(visualization_code)
+                # 5. Parse the generated code and summary from the LLM response
+                generated_code, visualization_summary = self._parse_code_and_summary(visualization_code)
+
                 if not generated_code:
                      error_msg = "Failed to parse Python code block from LLM response."
                      self.logger.error(f"{error_msg} Raw response was:\n{visualization_code}")
+                     # Still return error if code is missing, even if summary exists
                      return ReasoningStep(agent="VisualizationAgent", operation="error", details={"error": error_msg, "llm_response": visualization_code})
+                
+                if not visualization_summary:
+                    self.logger.warning(f"Could not parse summary from LLM response. Raw response was:\n{visualization_code}")
+                    # Proceed without summary if code is present
+
                 self.logger.debug(f"Parsed Generated Code:\n{generated_code}")
+                self.logger.debug(f"Parsed Summary:\n{visualization_summary}")
+
 
             except Exception as e:
                  error_msg = f"LLM call failed: {str(e)}"
@@ -139,8 +149,10 @@ class VisualizationAgent(Agent):
                  if 'fig' in exec_globals:
                      fig = exec_globals['fig']
                      # Generate HTML string for embedding, include Plotly.js from CDN
-                     visualization_html = fig.to_html(full_html=False, include_plotlyjs='cdn')
-                     self.logger.info(f"Generated Plotly HTML string.")
+                     # Generate a valid ID prefixed for CSS compatibility
+                     valid_div_id = f"plotly-div-{uuid.uuid4()}"
+                     visualization_html = fig.to_html(full_html=False, include_plotlyjs='cdn', div_id=valid_div_id)
+                     self.logger.info(f"Generated Plotly HTML string with ID: {valid_div_id}")
                  else:
                      error_msg = "LLM generated code did not define a 'fig' variable."
                      self.logger.error(error_msg)
@@ -160,6 +172,7 @@ class VisualizationAgent(Agent):
                 details={
                     "input_data_path": query_result_path,
                     "visualization_html": visualization_html, # Add HTML string
+                    "visualization_summary": visualization_summary, # Add summary string
                     "executed_code": generated_code # Include for debugging/transparency
                     # Removed output_html_path
                 }
@@ -196,16 +209,34 @@ class VisualizationAgent(Agent):
             self.logger.error(f"Failed to read prompt template file {prompt_path}: {e}")
             raise
 
-    def _parse_code_from_response(self, response_text: str) -> str | None:
-        """Extracts the Python code block from the LLM response."""
+    def _parse_code_and_summary(self, response_text: str) -> tuple[str | None, str | None]:
+        """Extracts the Python code block and the summary text from the LLM response."""
+        code = None
+        summary = None
+
         # Regex to find code block enclosed in triple backticks (```python ... ```)
-        match = re.search(r"```python\s*([\s\S]+?)\s*```", response_text, re.MULTILINE)
-        if match:
-            return match.group(1).strip()
+        code_match = re.search(r"```python\s*([\s\S]+?)\s*```", response_text, re.MULTILINE)
+        if code_match:
+            code = code_match.group(1).strip()
+            # Look for summary *after* the code block
+            summary_marker = "--- SUMMARY ---"
+            summary_start_index = response_text.find(summary_marker, code_match.end())
+            if summary_start_index != -1:
+                summary = response_text[summary_start_index + len(summary_marker):].strip()
         else:
             # Fallback: Maybe the LLM just returned code without backticks?
-            # Check for plotly express import/usage
+            # This fallback is less likely to work reliably with the summary format.
             if "import plotly.express as px" in response_text and "px." in response_text:
                  self.logger.warning("LLM response did not contain standard Python code block markers (```python). Attempting to use the whole response as code.")
-                 return response_text.strip()
-            return None # Could not find a code block
+                 # Attempt to find summary even in fallback
+                 summary_marker = "--- SUMMARY ---"
+                 summary_start_index = response_text.find(summary_marker)
+                 if summary_start_index != -1:
+                     # Assume code is everything before the marker
+                     code = response_text[:summary_start_index].strip()
+                     summary = response_text[summary_start_index + len(summary_marker):].strip()
+                 else:
+                     # Assume the whole response is code if no marker found
+                     code = response_text.strip()
+
+        return code, summary
