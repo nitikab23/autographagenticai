@@ -7,7 +7,7 @@ import io # Added for capturing df.info() output
 from typing import Dict, Any
 from src.agents.core import Agent, ReasoningStep
 from src.agents.context import ContextProtocol
-import google.genai as genai # Use genai consistently
+from google import genai
 from dotenv import load_dotenv # Added dotenv
 
 # Load environment variables
@@ -20,16 +20,13 @@ class VisualizationAgent(Agent):
         # Consider making the model name configurable
         try:
              # Ensure API key is configured before initializing
-             if not genai.api_key:
-                  api_key = os.getenv("GEMINI_API_KEY")
-                  if not api_key:
-                       raise ValueError("GEMINI_API_KEY environment variable not set.")
-                  genai.configure(api_key=api_key) # Configure globally
-             # Use GenerativeModel for async calls
-             self.llm_model = genai.GenerativeModel('gemini-1.5-flash') # Or another appropriate model
-             self.logger.info(f"Initialized Gemini model: {self.llm_model.model_name}")
+             api_key = os.getenv("GEMINI_API_KEY")
+             if not api_key:
+                raise ValueError("GEMINI_API_KEY not set")
+             self.client = genai.Client(api_key=api_key)
+             self.logger.info(f"Initialized Genai Client")
         except Exception as e:
-             self.logger.error(f"Failed to initialize Gemini model: {e}", exc_info=True)
+             self.logger.error(f"Failed to initialize Genai Client {e}", exc_info=True)
              # Decide how to handle this - maybe raise the error or set model to None
              # For now, let the error propagate if initialization fails.
              raise
@@ -47,10 +44,19 @@ class VisualizationAgent(Agent):
             self.logger.info(f"Reading data from: {query_result_path}")
             df = pd.read_csv(query_result_path)
 
-            # Ensure the output directory exists
-            output_dir = "storage/visualizations"
-            os.makedirs(output_dir, exist_ok=True)
-            output_image_path = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(query_result_path))[0]}_visualization.png")
+            # Get the query-specific output directory from context
+            query_output_dir = self.context.get("query_output_dir")
+            if not query_output_dir or not os.path.isdir(query_output_dir):
+                 # Fallback or error if directory not provided/found
+                 self.logger.warning(f"Query output directory not found in context ('{query_output_dir}'). Saving visualization to default location.")
+                 # Define a fallback path if needed, e.g., storage/visualizations
+                 # For now, let's raise an error if the specific dir isn't passed correctly
+                 error_msg = f"Query-specific output directory not found or invalid in context: {query_output_dir}"
+                 self.logger.error(error_msg)
+                 return ReasoningStep(agent="VisualizationAgent", operation="error", details={"error": error_msg})
+
+            # Define visualization path inside the query-specific directory
+            output_image_path = os.path.join(query_output_dir, "visualization.png") # Consistent filename
             self.logger.info(f"Target output image path: {output_image_path}")
 
             # 2. Prepare data summary for LLM
@@ -83,20 +89,21 @@ class VisualizationAgent(Agent):
             try:
                 self.logger.info("Calling LLM to generate visualization code...")
                 # Use generate_content for Gemini API
-                response = await self.llm_model.generate_content_async(prompt)
+                response = self.client.models.generate_content(
+            model="gemini-2.5-pro-exp-03-25",
+            contents=[prompt]
+        )
                 # TODO: Add more robust error handling for API responses (e.g., check safety ratings, finish reason)
                 # Access response text correctly based on Gemini API structure
-                if not response.candidates or not response.candidates[0].content or not response.candidates[0].content.parts:
-                     raise ValueError("Invalid or empty response received from LLM.")
-                raw_llm_output = response.candidates[0].content.parts[0].text
-                self.logger.debug(f"Raw LLM Output:\n{raw_llm_output}")
+                matplotlib_code = response.candidates[0].content.parts[0].text
+                self.logger.debug(f"Raw LLM Output:\n{matplotlib_code}")
 
                 # 5. Parse the generated code from the LLM response
-                generated_code = self._parse_code_from_response(raw_llm_output)
+                generated_code = self._parse_code_from_response(matplotlib_code)
                 if not generated_code:
                      error_msg = "Failed to parse Python code block from LLM response."
-                     self.logger.error(f"{error_msg} Raw response was:\n{raw_llm_output}")
-                     return ReasoningStep(agent="VisualizationAgent", operation="error", details={"error": error_msg, "llm_response": raw_llm_output})
+                     self.logger.error(f"{error_msg} Raw response was:\n{matplotlib_code}")
+                     return ReasoningStep(agent="VisualizationAgent", operation="error", details={"error": error_msg, "llm_response": matplotlib_code})
                 self.logger.debug(f"Parsed Generated Code:\n{generated_code}")
 
             except Exception as e:
@@ -145,16 +152,18 @@ class VisualizationAgent(Agent):
              return ReasoningStep(agent="VisualizationAgent", operation="error", details={"error": error_msg})
         except Exception as e:
             self.logger.error(f"Visualization generation failed: {str(e)}", exc_info=True)
-            # Consider including traceback in details if helpful for debugging
+            # Log the general error and return an error step
+            error_details = {"error": f"Visualization generation failed: {str(e)}"}
+            self.logger.error(f"General execution error. Details: {error_details}", exc_info=True)
             return ReasoningStep(
                 agent="VisualizationAgent",
                 operation="error",
-                details={"error": f"Visualization generation failed: {str(e)}"}
+                details=error_details
             )
 
     def _load_prompt_template(self) -> str:
-        """Loads the prompt template from the file."""
-        # Consider making the path configurable or relative to the agent file
+        """Loads the prompt template from the file. Called during init."""
+        # Consider making the path configurable
         prompt_path = "src/agents/prompts/visualization/generate_code.txt"
         try:
             with open(prompt_path, 'r') as f:

@@ -90,12 +90,14 @@ class CoordinatorAgent(Agent):
                         # Define output path within project storage
                         project_id = self.context.get("project_id")
                         timestamp = int(time.time())
-                        # Ensure storage/results directory exists relative to project root
-                        # Assuming project root is accessible or base path is configured
-                        # For simplicity, let's assume current working directory is project root
-                        results_dir = Path("storage/results")
-                        results_dir.mkdir(parents=True, exist_ok=True) # Create dir if not exists
-                        output_file = results_dir / f"{project_id}_query_{timestamp}.csv"
+                        # Create a unique directory for this query's output
+                        query_output_dir_name = f"{project_id}_{timestamp}"
+                        query_output_dir = Path("storage/results") / query_output_dir_name
+                        query_output_dir.mkdir(parents=True, exist_ok=True) # Create the specific query dir
+                        self.logger.info(f"Created output directory: {query_output_dir}")
+
+                        # Define CSV path inside the new directory
+                        output_file = query_output_dir / "query_result.csv" # Consistent filename inside dir
 
                         self.conn_manager.connect()
                         self.logger.info(f"Executing SQL query:\n{sql_query}")
@@ -112,12 +114,13 @@ class CoordinatorAgent(Agent):
                             details={"status": "success", "row_count": retrieved_count, "output_file": saved_path}
                         ))
 
-                        # Update context with file path and row count, transition to VISUALIZE
+                        # Update context with file path, row count, and the output directory path
                         self.workflow_state = "VISUALIZE" # Changed from COMPLETE
                         self.context = self.context.update({
                             "workflow_state": self.workflow_state,
                             "sql_query": sql_query,
-                            "query_result_path": saved_path, # Store file path
+                            "query_result_path": saved_path, # Store CSV file path
+                            "query_output_dir": str(query_output_dir), # Store the directory path for visualization agent
                             "query_result_row_count": retrieved_count # Store row count
                             # Remove "query_results" key if it existed
                         })
