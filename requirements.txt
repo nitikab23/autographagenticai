@@ -19,6 +19,8 @@ google-genai==1.8.0
 # Data Processing
 pandas==2.2.3  # Latest, minor updates
 numpy==1.26.4  # Latest, aligns with pandas
+matplotlib==3.9.1 # Added for plotting
+seaborn==0.13.2 # Added for plotting
 
 # Development and Testing
 pytest==8.3.3  # Latest, minor updates
@@ -26,3 +28,4 @@ mypy==1.13.0  # Latest, supports modern python
 black==24.8.0  # Latest, formatting updates
 isort==5.13.2  # Latest, minor updates
 psycopg2-binary>=2.9.9
+python-dotenv # For loading .env files

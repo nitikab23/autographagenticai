@@ -25,7 +25,7 @@ Follow these steps meticulously to construct the JSON output, relying strictly o
     *   *Rationale: Minimizing columns reduces I/O and processing.*
 
 3.  **Detect Ambiguities & Propose Resolutions:**
-    *   Identify any ambiguities or underspecified aspects in the `Query` (e.g., vague metrics like "performance", unclear dimensions, ambiguous timeframes, uncertain join paths or types, multiple possible columns for a concept).
+    *   Identify ambiguities or underspecified aspects where the interpretation **significantly impacts** the resulting data or query structure (e.g., choice between multiple relevant date columns, definition of a core non-standard metric, conflicting requirements).
     *   For each ambiguity, formulate a concise `question` to ask the user for clarification.
     *   Provide a sensible `suggestion` as a default or recommended approach based on general principles or the provided context (e.g., suggest `COUNT(*)` for a simple count, propose a specific join type based on inference, suggest using a specific timestamp column if multiple exist). Clearly state the assumption behind the suggestion.
     *   Use `User Clarifications` to resolve ambiguities identified here or previously.
@@ -36,22 +36,27 @@ Follow these steps meticulously to construct the JSON output, relying strictly o
         *   Analyze query phrasing: "Show **all** A and their B" implies `LEFT JOIN` from A to B. "Show A **with** B" or "A **that have** B" implies `INNER JOIN`.
         *   Identify the primary entity. If the query asks for a complete view of this entity plus related optional data, use `LEFT JOIN`.
         *   Consider data characteristics: If one side of the join is known to be much smaller and serves as a filter/lookup, structure the join accordingly (though the spec focuses on logical structure, not physical execution order).
-    *   Specify each join precisely: `left_table`, `left_column`, `right_table`, `right_column` (all fully qualified based on metadata) and the inferred `type`.
-    *   **Handle Join Ambiguity:** If the query phrasing is unclear about whether to include non-matching records:
-        *   Propose the join type (`INNER` or `LEFT`) that seems most plausible based on context or common patterns (often `INNER` for filtering/intersection, `LEFT` for retaining all base entities).
-        *   **Flag this as an ambiguity**, providing a clear `question` (e.g., "Should we include customers even if they have no orders?") and state your `suggestion` (e.g., "Suggesting INNER JOIN to show only customers with orders. Please confirm, or specify LEFT JOIN to include all customers.").
+    *   Specify each join precisely: `left_table`, `left_column`, `right_table`, `right_column` and the inferred `type`. Use FULLY QUALIFIED NAMES for tables and SHORT NAMES for columns in initial_joins
+    *  **Handle Join Ambiguity:** Only flag join type as an `ambiguity` requiring a question if:
+        *   There is a clear contradiction in the query regarding inclusion/exclusion.
+        *   Multiple, equally plausible join paths exist between necessary tables with no clear primary route inferable from context or naming.
+        *   The choice between `INNER` and `LEFT` significantly changes the core interpretation of the query's main goal, and explicit phrasing is absent.
     *   *Rationale: Correct join type avoids data loss and ensures semantic accuracy.*
 
 5.  **Define Initial Filters (WHERE Clause - Apply Early):**
     *   Extract explicit filtering conditions mentioned in the `Query` that should be applied *before* aggregation. These filters are crucial for reducing the dataset size early.
-    *   Represent each filter (`initial_filters`) as an object with `column` (fully qualified from metadata), the specific `condition` (e.g., `> 100`, `= 'Completed'`, `IS NOT NULL`, `BETWEEN date '2023-01-01' AND date '2023-12-31'`), and a `reason` linking it to the query phrase.
+    *   Represent each filter (`initial_filters`) as an object containing:
+        *   `condition`: A string representing the **complete SQL condition**, including the fully qualified column name(s), operators, values, and any necessary functions (e.g., `"schema_name.table.column > 100"`, `"schema_name.table.status = 'Completed'"`, `"YEAR(schema_name.table.date_col) = 2023"`).
+        *   `reason`: A string linking the filter back to the relevant phrase in the `Query`.
+    *   Ensure the `condition` string uses fully qualified names for all column references based on the `Metadata Context`.
     *   *Rationale: Filtering early significantly reduces data processed in subsequent steps like joins and aggregations.*
 
-6.  **Specify Initial Aggregations & Grouping (Targeted Summary):**
-    *   Define the necessary aggregation functions (`initial_aggregations`) based *only* on the metrics explicitly requested for the initial visualization (e.g., `SUM(schema.table.numeric_column)`, `COUNT(DISTINCT schema.table.identifier_column)`, `AVG(schema.table.value_column)`, `COUNT(*)`). Use column names found in the `Metadata Context`. Ensure `DISTINCT` is used only if explicitly required by the query (e.g., "unique count").
-    *   Assign a clear and concise `alias` to each aggregation (e.g., `total_value`, `distinct_identifier_count`, `average_metric`, `record_count`).
-    *   Identify the dimensions explicitly requested in the `Query` for grouping and list their corresponding fully qualified column names from the `Metadata Context` as `group_by_columns`. These columns form the `GROUP BY` clause.
-    *   *Rationale: Aggregation summarizes data, reducing rows significantly.*
+6. **Construct `initial_select_columns`:
+    * This list defines the final SELECT statement. the single source for the actual SELECT expressions. It must contain "expression" and "alias" for each item to be selected:
+    * For Grouping Dimensions:** The `expression` should be the fully qualified column name or expression listed in `group_by_columns`. The `alias` should be a user-friendly name for the dimension.
+        * Identify the dimensions explicitly requested in the Query for grouping and list their corresponding fully qualified column names from the Metadata Context as group_by_columns. These columns form the GROUP BY clause.
+    * For All Aggregations (Base and Derived):** The `expression` field **MUST contain the complete, final SQL expression** required to calculate the value (e.g., `SUM(fqn.col)`, `COUNT(DISTINCT fqn.col)`, `CASE WHEN COUNT(...) ... END`). The `alias` field should be the final desired name for the metric.
+        * Define the necessary aggregation functions based only on the metrics explicitly requested for the initial visualization.
 
 7.  **Determine Sorting Requirements (ORDER BY):**
     *   Analyze the `Query` for explicit or strongly implied sorting needs (e.g., "order by", "sort by", "top N", "bottom N", "highest", "lowest"). Sorting applies *after* aggregation.
@@ -68,19 +73,73 @@ Follow these steps meticulously to construct the JSON output, relying strictly o
     *   *Rationale: Filters results based on aggregated values.*
 
 10. **Incorporate Context & Clarifications:**
-    *   Actively use `Prior Context` and `User Clarifications` to refine all previous steps. Ensure that resolved ambiguities correctly influence the selection of tables, columns, joins, filters, and aggregations based on the provided `Metadata Context`, maintaining the focus on initial query efficiency.
+    *   **CRITICAL:** Review the provided `User Clarifications`. If clarifications exist, you **MUST** modify the plan details generated in the previous steps (tables, columns, joins, filters, aggregations, grouping, etc.) to adhere to the user's confirmed choices or provided answers. Do not simply repeat your initial suggestion if the user confirmed it; ensure the *entire plan* reflects the clarified understanding based on the provided `Metadata Context`, maintaining the focus on initial query.
 
 **Output:**
 
 Generate a single, valid JSON object adhering strictly to the following structure. The *purpose* of this JSON is to specify the *most efficient possible query* for the *initial* visualization based *only* on the direct requirements. Respond with a valid JSON object containing:
-- `initial_tables`: Array of fully qualified table names for the initial query.
-- `initial_columns`: Object mapping each initial table to an array of essential column objects (`name`, `type`, `nullable`).
-- `initial_joins`: Array of join conditions for the initial query (`left_table`, `left_column`, `right_table`, `right_column`, `type`).
-- `initial_filters`: Array of filter conditions for the initial query (`column`, `condition`, `reason`).
-- `initial_aggregations`: Array of objects defining aggregations, each with `expression` (e.g., `SUM(payment.amount)`) and `alias` (e.g., `total_revenue`).
-- `group_by_columns`: Array of fully qualified column names for the initial `GROUP BY` clause.
-- `initial_select_columns`: Array containing the `group_by_columns` and the `alias` names from `initial_aggregations`, defining the SELECT list for the initial query.
-- `order_by_spec`: (Optional) Object specifying sorting, with `column` (alias or fully qualified name) and `direction` ('ASC' or 'DESC').
-- `limit_count`: (Optional) Integer specifying the number of rows to limit the result set to.
-- `having_conditions`: (Optional) Array of objects, each with `condition` (e.g., "total_revenue > 1000", "rental_count <= 5").
-- `ambiguities`: Array with `question` and `suggestion` for any unresolved issues.
+
+EXAMPLE_START
+{{
+"initial_tables": [
+"schema_name.table_name1",
+"schema_name.table_name2"
+],
+"initial_columns": {{
+"schema_name.table_name1": [
+{{"name": "schema_name.table_name1.dimension_col", "type": "VARCHAR", "nullable": true}},
+{{"name": "schema_name.table_name1.join_key_col", "type": "BIGINT", "nullable": false}}
+],
+"schema_name.table_name2": [
+{{"name": "schema_name.table_name2.metric_col", "type": "DOUBLE", "nullable": true}},
+{{"name": "schema_name.table_name2.foreign_key_col", "type": "BIGINT", "nullable": false}}
+]
+}},
+"initial_joins": [
+{{
+"left_table": "schema_name.table_name1",
+"left_column": "join_key_col",
+"right_table": "schema_name.table_name2",
+"right_column": "foreign_key_col",
+"type": "join_type"
+}}
+],
+"initial_filters": [
+{{
+"condition": "  schema_name.table_name1.metrics_col = SomeValue",
+"reason": "Filtering based on query phrase 'where status is SomeValue'"
+}},
+{{
+"condition": "  schema_name.table_name1.dimension_col IN SomeValue",
+"reason": "Filtering based on query phrase 'where status is in SomeValue'"
+}}
+],
+"group_by_columns": [
+"schema_name.table_name1.dimension_col"
+],
+"initial_select_columns": [
+{{
+"expression": "SUM(schema_name.table_name2.metric_col)",
+"alias": "value"
+}},
+{{
+"expression": "schema_name.table_name1.dimension_col",
+"alias": "dimension_col"
+}}
+],
+"order_by_spec": {{
+"column": "schema_name.table_name1.dimension_col",
+"direction": "DESC"
+}},
+"limit_count": 10,
+"having_conditions": [
+{{ "condition": "value > 5000" }}
+],
+"ambiguities": [
+{{
+"question": "question",
+"suggestion": "suggestion"
+}}
+]
+}}
+EXAMPLE_END

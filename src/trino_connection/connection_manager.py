@@ -2,6 +2,8 @@ from datetime import datetime, date
 from decimal import Decimal
 import trino
 import logging
+import csv # Import csv module
+import os # Import os for path operations
 from typing import List, Dict, Optional, Any
 from .connection_config import SecureConnectionStorage
 
@@ -9,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class TrinoConnectionManager:
     """Manages connections to Trino server"""
-    
+
     def __init__(
         self,
         host: str,
@@ -34,6 +36,11 @@ class TrinoConnectionManager:
 
     def connect(self) -> 'TrinoConnectionManager':
         """Establish connection to Trino"""
+        # Avoid reconnecting if already connected
+        if self._connection:
+            # TODO: Add check if connection is still valid?
+            return self
+
         try:
             import trino
             connection_params = {
@@ -46,45 +53,29 @@ class TrinoConnectionManager:
 
             if self.password:
                 connection_params['auth'] = trino.auth.BasicAuthentication(
-                    self.user, 
+                    self.user,
                     self.password
                 )
 
             self._connection = trino.dbapi.connect(**connection_params)
+            logger.info(f"Successfully connected to Trino at {self.host}:{self.port}")
             return self
         except Exception as e:
             logger.error(f"Failed to connect to Trino: {str(e)}")
             raise
 
-    def get_connection(self, connection_id: str) -> Optional['TrinoConnectionManager']:
-        """Get a connection by ID"""
-        if not self.connection_storage:
-            return None
-            
-        connection_details = self.connection_storage.get_connection(connection_id)
-        if not connection_details:
-            return None
-            
-        return TrinoConnectionManager(
-            host=connection_details['host'],
-            port=connection_details['port'],
-            user=connection_details['user'],
-            password=connection_details.get('password'),
-            http_scheme=connection_details.get('http_scheme', 'http'),
-            verify=connection_details.get('verify', True),
-            connection_storage=self.connection_storage
-        ).connect()
+    # Removed duplicate get_connection method
 
     @property
     def connection(self):
         """Get the current connection"""
+        if not self._connection:
+             self.connect() # Attempt to connect if not already connected
         return self._connection
 
     def cursor(self):
         """Get a cursor from the connection"""
-        if not self._connection:
-            raise Exception("Not connected to database. Call connect() first.")
-        return self._connection.cursor()
+        return self.connection.cursor() # Use property to ensure connection
 
     @classmethod
     def from_connection_details(cls, details: Dict[str, Any]) -> 'TrinoConnectionManager':
@@ -102,8 +93,8 @@ class TrinoConnectionManager:
         """Connect to specific catalog and schema"""
         try:
             # If already connected to this catalog/schema, no need to reconnect
-            if (self.current_catalog == catalog and 
-                self.current_schema == schema and 
+            if (self.current_catalog == catalog and
+                self.current_schema == schema and
                 self._connection is not None):
                 return self
 
@@ -128,18 +119,18 @@ class TrinoConnectionManager:
 
             if self.password:
                 connection_params['auth'] = trino.auth.BasicAuthentication(
-                    self.user, 
+                    self.user,
                     self.password
                 )
 
             self._connection = trino.dbapi.connect(**connection_params)
-            
+
             if not self._connection:
                 raise Exception(f"Failed to establish connection to {catalog}.{schema}")
-            
+
             self.current_catalog = catalog
             self.current_schema = schema
-            
+            logger.info(f"Connected to Trino catalog: {catalog}, schema: {schema}")
             return self
 
         except Exception as e:
@@ -150,14 +141,14 @@ class TrinoConnectionManager:
         """Get list of tables in the specified catalog and schema"""
         # First ensure we're connected to the right catalog/schema
         self.connect_to_catalog(catalog, schema)
-        
+
         query = f"""
-        SELECT table_name 
-        FROM {catalog}.information_schema.tables 
-        WHERE table_catalog = '{catalog}' 
+        SELECT table_name
+        FROM {catalog}.information_schema.tables
+        WHERE table_catalog = '{catalog}'
         AND table_schema = '{schema}'
         """
-        
+
         cursor = None
         try:
             cursor = self.cursor()
@@ -172,21 +163,21 @@ class TrinoConnectionManager:
 
     def get_table_info(self, catalog: str, schema: str, table: str) -> Dict[str, Any]:
         """Get detailed table information including columns and sample data"""
-        if not self._connection:
-            raise ValueError("No active connection")
-
+        # Ensure connection to the correct catalog/schema
+        self.connect_to_catalog(catalog, schema)
+        cursor = None
         try:
-            cursor = self._connection.cursor()
-            
+            cursor = self.cursor()
+
             # Get column information
             cursor.execute(f"""
-                SELECT column_name, data_type, is_nullable 
-                FROM {catalog}.information_schema.columns 
-                WHERE table_catalog = '{catalog}' 
-                AND table_schema = '{schema}' 
+                SELECT column_name, data_type, is_nullable
+                FROM {catalog}.information_schema.columns
+                WHERE table_catalog = '{catalog}'
+                AND table_schema = '{schema}'
                 AND table_name = '{table}'
             """)
-            
+
             columns = []
             for col in cursor.fetchall():
                 columns.append({
@@ -201,7 +192,12 @@ class TrinoConnectionManager:
             if cursor.description:
                 col_names = [desc[0] for desc in cursor.description]
                 for row in cursor:
-                    sample_data.append(dict(zip(col_names, row)))
+                    # Convert complex types like Decimal, date, datetime to string for JSON compatibility
+                    processed_row = [
+                        str(item) if isinstance(item, (Decimal, date, datetime)) else item
+                        for item in row
+                    ]
+                    sample_data.append(dict(zip(col_names, processed_row)))
 
             return {
                 "name": table,
@@ -213,29 +209,70 @@ class TrinoConnectionManager:
             }
 
         except Exception as e:
-            raise Exception(f"Failed to get table info: {str(e)}")
+            logger.error(f"Failed to get table info for {catalog}.{schema}.{table}: {str(e)}")
+            raise
         finally:
             if cursor:
                 cursor.close()
 
-    def execute_query(self, query: str) -> List[Dict]:
-        """Execute a query and return results as list of dictionaries"""
+    def execute_query(self, query: str, output_file_path: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Execute a query. If output_file_path is provided, write results to CSV,
+        otherwise return results as list of dictionaries (use with caution for large results).
+
+        Args:
+            query (str): The SQL query to execute.
+            output_file_path (Optional[str]): Path to save results as CSV.
+
+        Returns:
+            Dict[str, Any]: Execution metadata including row_count and optionally output_file_path or results list.
+        """
         if not self._connection:
-            raise Exception("Not connected to Trino server")
+            self.connect() # Ensure connection
 
         cursor = None
+        row_count = 0
+        column_names = []
+        results_list = [] # Only used if output_file_path is None
+
         try:
-            cursor = self._connection.cursor()
+            cursor = self.cursor()
             cursor.execute(query)
-            
+
             if not cursor.description:
-                return []
-                
-            columns = [desc[0] for desc in cursor.description]
-            results = []
-            for row in cursor:
-                results.append(dict(zip(columns, row)))
-            return results
+                logger.info("Query executed but returned no columns/rows.")
+                return {"row_count": 0, "output_file_path": output_file_path, "columns": []}
+
+            column_names = [desc[0] for desc in cursor.description]
+
+            if output_file_path:
+                # Ensure directory exists
+                os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+                with open(output_file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(column_names) # Write header
+                    for row in cursor:
+                        # Convert complex types for CSV writing if necessary (though csv module handles most)
+                        processed_row = [
+                             str(item) if isinstance(item, (Decimal, date, datetime)) else item
+                             for item in row
+                        ]
+                        writer.writerow(processed_row)
+                        row_count += 1
+                logger.info(f"Query results written to {output_file_path}")
+                return {"row_count": row_count, "output_file_path": output_file_path, "columns": column_names}
+            else:
+                # Return results directly (use cautiously)
+                logger.warning("Returning query results directly in memory. This may fail for large datasets.")
+                for row in cursor:
+                     processed_row = [
+                         str(item) if isinstance(item, (Decimal, date, datetime)) else item
+                         for item in row
+                     ]
+                     results_list.append(dict(zip(column_names, processed_row)))
+                     row_count += 1
+                return {"row_count": row_count, "results": results_list, "columns": column_names}
+
         except Exception as e:
             logger.error(f"Query execution failed: {str(e)}")
             raise
@@ -248,6 +285,7 @@ class TrinoConnectionManager:
         if self._connection:
             self._connection.close()
             self._connection = None
+            logger.info("Trino connection closed.")
         if self._sqlalchemy_engine:
             self._sqlalchemy_engine.dispose()
             self._sqlalchemy_engine = None
@@ -257,10 +295,10 @@ class TrinoConnectionManager:
     def delete_connection(self, connection_id: str) -> bool:
         """
         Delete a saved connection
-        
+
         Args:
             connection_id (str): ID of the connection to delete
-            
+
         Returns:
             bool: True if connection was deleted, False if connection not found
         """
@@ -268,10 +306,14 @@ class TrinoConnectionManager:
             # Close connection if it's active
             if self.connection:
                 self.close()
-            
+
             # Delete from storage
-            return self.connection_storage.delete_connection(connection_id)
-            
+            if self.connection_storage:
+                return self.connection_storage.delete_connection(connection_id)
+            else:
+                logger.warning("No connection storage configured, cannot delete.")
+                return False
+
         except Exception as e:
             logger.error(f"Failed to delete connection: {str(e)}")
             raise
@@ -279,27 +321,39 @@ class TrinoConnectionManager:
     def list_connections(self) -> List[str]:
         """
         List all available connection IDs
-        
+
         Returns:
             List[str]: List of connection IDs
         """
-        return self.connection_storage.list_connections()
+        if self.connection_storage:
+            return self.connection_storage.list_connections()
+        else:
+            logger.warning("No connection storage configured, cannot list connections.")
+            return []
 
     def get_table_metadata(self, catalog: str, schema: str, table: str) -> Dict:
         """Get basic table metadata - delegates to metadata extractor for detailed info"""
-        if not self._connection:
-            raise ValueError("No active connection")
-        
+        self.connect_to_catalog(catalog, schema)
         cursor = None
         try:
-            cursor = self._connection.cursor()
-            cursor.execute(f"SELECT 1 FROM {catalog}.{schema}.{table} LIMIT 1")
+            cursor = self.cursor()
+            # More robust check using information_schema
+            cursor.execute(f"""
+                SELECT count(*)
+                FROM {catalog}.information_schema.tables
+                WHERE table_catalog = '{catalog}'
+                AND table_schema = '{schema}'
+                AND table_name = '{table}'
+            """)
+            exists = cursor.fetchone()[0] > 0
             return {
-                'exists': True,
-                'accessible': True
+                'exists': exists,
+                'accessible': exists # Assumes existence implies accessibility for this basic check
             }
         except Exception as e:
             logger.error(f"Error checking table {catalog}.{schema}.{table}: {str(e)}")
+            # Attempt to determine if the error is due to non-existence vs other issues
+            # This is complex and database-specific; simplified check here
             return {
                 'exists': False,
                 'accessible': False,
@@ -309,73 +363,19 @@ class TrinoConnectionManager:
             if cursor:
                 cursor.close()
 
-    def get_connection(self, connection_id: str) -> Optional['TrinoConnectionManager']:
-        """
-        Get an existing connection by ID
-        
-        Args:
-            connection_id (str): Connection ID
-        
-        Returns:
-            Optional[TrinoConnectionManager]: Connection manager instance or None if not found
-        """
-        try:
-            # Get connection details from storage
-            connection_details = self.connection_storage.get_connection(connection_id)
-            if not connection_details:
-                logger.warning(f"No connection found for ID: {connection_id}")
-                return None
-            
-            # Create new connection manager instance with stored details
-            connection = TrinoConnectionManager(
-                host=connection_details['host'],
-                port=connection_details['port'],
-                user=connection_details['user'],
-                password=connection_details.get('password'),
-                http_scheme=connection_details.get('http_scheme', 'http'),
-                connection_storage=self.connection_storage
-            )
-            
-            # Connect using stored catalog/schema if available
-            if 'catalog' in connection_details and 'schema' in connection_details:
-                connection.connect_to_catalog(
-                    catalog=connection_details['catalog'],
-                    schema=connection_details['schema']
-                )
-            else:
-                connection.connect()
-            
-            return connection
-        
-        except Exception as e:
-            logger.error(f"Failed to get connection {connection_id}: {str(e)}")
-            raise
+    # Removed duplicate get_connection method
 
     def close_all(self):
         """Close all active connections"""
-        try:
-            if hasattr(self, 'connection') and self.connection:
-                self.connection.close()
-        except Exception as e:
-            logger.error(f"Error closing connections: {str(e)}")
+        # This method might be more relevant at the application level if multiple managers exist
+        self.close()
 
     def __enter__(self):
         """Context manager entry"""
-        return self
+        return self.connect() # Ensure connected on entry
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit"""
         self.close()
 
-class TrinoConnectionConfig:
-    @staticmethod
-    def save_connection(connection_details: Dict):
-        """Save Trino connection details securely"""
-        # TODO: Implement secure storage mechanism
-        pass
-    
-    @staticmethod
-    def load_connection(connection_name: str) -> Optional[Dict]:
-        """Load saved Trino connection details"""
-        # TODO: Implement secure retrieval mechanism
-        return None
+# Removed TrinoConnectionConfig class as it seemed incomplete/unused
