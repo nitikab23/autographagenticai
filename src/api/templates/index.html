@@ -33,7 +33,7 @@
 <body class="bg-gray-100 flex flex-col h-screen">
 
     <header class="bg-white shadow-sm p-4">
-        <h1 class="text-2xl font-bold text-gray-700 text-center">AI Data Analysis Agent</h1>
+        <h1 class="text-2xl font-bold text-gray-700 text-center">Insights Flow Agent</h1>
     </header>
 
     <!-- Chat Log Area -->
@@ -190,13 +190,20 @@
 
             const tabs = [];
             const plotlyInfo = extractPlotlyData(data.visualization_html); // Extract info first
+            const hasSummary = !!data.visualization_summary; // Check if summary exists
 
-            if (data.visualization_summary) tabs.push({ id: 'summary', label: 'Summary' });
+            // Determine tabs needed - Summary is handled differently now
+            // if (hasSummary) tabs.push({ id: 'summary', label: 'Summary' }); // REMOVED Summary tab
             if (plotlyInfo) tabs.push({ id: 'chart', label: 'Chart' }); // Add chart tab only if info was extracted
             if (data.data_table_html) tabs.push({ id: 'data', label: 'Data' });
             if (data.sql_query) tabs.push({ id: 'sql', label: 'SQL' });
 
-            if (tabs.length === 0) {
+            // If only a summary exists (no chart, data, or sql), add it as the only content
+            if (hasSummary && !plotlyInfo && !data.data_table_html && !data.sql_query) {
+                 tabs.push({ id: 'summary-only', label: 'Summary'});
+            }
+
+            if (tabs.length === 0 && !hasSummary) { // Adjusted condition
                 const noDataP = document.createElement('p');
                 noDataP.textContent = data.data_summary || "Analysis complete, but no specific outputs generated.";
                 noDataP.classList.add('text-sm', 'text-gray-700');
@@ -219,10 +226,11 @@
                 }
 
                 // Populate Content
-                if (tab.id === 'summary') {
-                    content.innerHTML = `<p class="text-sm text-gray-700">${escapeHtml(data.visualization_summary)}</p>`;
-                } else if (tab.id === 'chart') {
-                    // Create only the target div placeholder
+                // if (tab.id === 'summary') { // REMOVED Summary tab population
+                //     content.innerHTML = `<p class="text-sm text-gray-700">${escapeHtml(data.visualization_summary)}</p>`;
+                // } else
+                if (tab.id === 'chart') {
+                    // Create chart container and placeholder div
                     const chartContainer = document.createElement('div');
                     chartContainer.classList.add('visualization-container', 'bg-white', 'p-1', 'rounded-md', 'border', 'border-gray-200', 'min-h-[400px]', 'flex', 'items-center', 'justify-center');
                     const chartDiv = document.createElement('div');
@@ -231,7 +239,17 @@
                     chartDiv.style.height = '100%';
                     chartDiv.style.width = '100%';
                     chartContainer.appendChild(chartDiv);
-                    content.appendChild(chartContainer);
+                    content.appendChild(chartContainer); // Add chart container first
+
+                    // If summary exists, add it below the chart container
+                    if (hasSummary) {
+                        const summaryDiv = document.createElement('div');
+                        summaryDiv.classList.add('mt-3', 'pt-3', 'border-t', 'border-gray-200'); // Add some spacing and separator
+                        summaryDiv.innerHTML = `<p class="text-sm text-gray-700">${escapeHtml(data.visualization_summary)}</p>`;
+                        content.appendChild(summaryDiv);
+                    }
+                } else if (tab.id === 'summary-only') { // Handle case where only summary exists
+                     content.innerHTML = `<p class="text-sm text-gray-700">${escapeHtml(data.visualization_summary)}</p>`;
                 } else if (tab.id === 'data') {
                     content.innerHTML = `<div class="data-table overflow-x-auto text-xs">${data.data_table_html || '<p>No data table available.</p>'}</div>`;
                 } else if (tab.id === 'sql') {
