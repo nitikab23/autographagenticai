@@ -150,12 +150,19 @@ class ExtractorAgent(Agent):
 
 
         # --- Generate ORDER BY clause ---
-        order_by_spec_list = metadata.get("order_by_spec") # Get the potential list
+        order_by_spec_input = metadata.get("order_by_spec") # Get the input (could be dict or list)
         order_by_clause = ""
         sort_terms = [] # List to hold individual "column direction" strings
 
-        # Check if it's a non-empty list
-        if order_by_spec_list and isinstance(order_by_spec_list, list):
+        # Normalize input: Ensure we always have a list to iterate over
+        order_by_spec_list = []
+        if isinstance(order_by_spec_input, dict):
+            order_by_spec_list = [order_by_spec_input] # Wrap single dict in a list
+        elif isinstance(order_by_spec_input, list):
+            order_by_spec_list = order_by_spec_input # Use the list directly
+
+        # Process the list (now guaranteed to be a list, possibly empty)
+        if order_by_spec_list:
             for spec in order_by_spec_list:
                 # Validate each item in the list
                 if isinstance(spec, dict) and spec.get("column"):

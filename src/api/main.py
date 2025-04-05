@@ -294,7 +294,7 @@ async def analyze_query(
         reasoning_steps = final_context.get("reasoning_steps", [])
 
         # --- Extract visualization HTML and summary by finding the correct step ---
-        visualization_html = None
+        visualization_json = None # Fix: Initialize visualization_json
         visualization_summary = None
         # Iterate backwards through steps to find the visualization result
         for step in reversed(reasoning_steps):
@@ -329,6 +329,7 @@ async def analyze_query(
                 # Log error reading file, but don't fail the whole request
                 print(f"Warning: Could not read or convert CSV {query_result_path} to HTML table: {read_err}")
 
+        print(f"DEBUG: Final context snapshot before returning response: {final_context}") # Add this line
 
         return {
             "status": "success", # Assuming completion means success for now
