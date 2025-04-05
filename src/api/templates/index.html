@@ -143,66 +143,9 @@
             if (indicator) indicator.remove();
         }
 
-        // Function to extract Plotly data from HTML string
-        function extractPlotlyData(htmlString) {
-            console.log("Attempting to extract Plotly data..."); // DEBUG
-            if (!htmlString) {
-                console.log("Input HTML string is null or empty."); // DEBUG
-                return null;
-            }
-            // CORRECTED Regex: Allows optional brace before semicolon
-            const regex = /Plotly\.newPlot\(\s*['"]([^'"]+)['"],\s*(\[.*?\]),\s*(\{.*?\})\s*(?:,\s*(\{.*?\})\s*)?\s*\)\s*\}?\s*;/s;
-            const plotCallMatch = htmlString.match(regex);
-            console.log("Regex match result:", plotCallMatch ? "Found" : "Not Found"); // DEBUG
+        // Removed extractPlotlyData function as it's no longer needed
 
-            if (plotCallMatch) {
-                const divId = plotCallMatch[1];
-                const dataStr = plotCallMatch[2];
-                const layoutStr = plotCallMatch[3];
-                const configStr = plotCallMatch[4];
-
-                console.log("Regex matched. Div ID:", divId); // DEBUG
-
-                try {
-                    console.log("Attempting to parse Plotly data..."); // DEBUG
-                    const plotData = new Function(`return ${dataStr}`)();
-                    console.log("Parsed Plotly data successfully."); // DEBUG
-
-                    console.log("Attempting to parse Plotly layout..."); // DEBUG
-                    const plotLayout = new Function(`return ${layoutStr}`)();
-                    console.log("Parsed Plotly layout successfully."); // DEBUG
-
-                    let plotConfig = {"responsive": true};
-                    if (configStr) {
-                        try {
-                            console.log("Attempting to parse Plotly config..."); // DEBUG
-                            plotConfig = new Function(`return ${configStr}`)();
-                            console.log("Parsed Plotly config successfully."); // DEBUG
-                        } catch(configError) {
-                             console.warn("Failed to parse Plotly config, using default. Error:", configError); // DEBUG
-                             plotConfig = {"responsive": true}; // Fallback to default
-                        }
-                    } else {
-                         console.log("No Plotly config found, using default."); // DEBUG
-                    }
-
-                    return {
-                        divId: divId,
-                        data: plotData,
-                        layout: plotLayout,
-                        config: plotConfig
-                    };
-                } catch (e) {
-                    console.error("Failed to parse Plotly JSON components using Function constructor:", e);
-                    return null;
-                }
-            }
-            console.warn("Could not find valid Plotly.newPlot call signature in visualization_html");
-            return null;
-        }
-
-
-        // Function to create and manage tabs - REVISED FOR EXPLICIT PLOTLY CALL
+        // Function to create and manage tabs - REVISED FOR JSON SPEC
         function createTabs(data, messageId) {
             const tabContainer = document.createElement('div');
             const tabButtons = document.createElement('div');
@@ -210,26 +153,30 @@
             const tabContentContainer = document.createElement('div');
 
             const tabs = [];
-            const plotlyInfo = extractPlotlyData(data.visualization_html); // Extract info first
+            // Check for JSON spec instead of extracting from HTML
+            const hasPlotlyJson = !!data.visualization_json;
             const hasSummary = !!data.visualization_summary; // Check if summary exists
             const hasAssumptions = data.assumptions && Array.isArray(data.assumptions) && data.assumptions.length > 0; // Check for assumptions
 
             // Determine tabs needed
-            if (plotlyInfo) tabs.push({ id: 'chart', label: 'Chart' });
+            if (hasPlotlyJson) tabs.push({ id: 'chart', label: 'Chart' }); // Add chart tab if JSON exists
             if (data.data_table_html) tabs.push({ id: 'data', label: 'Data' });
             if (data.sql_query) tabs.push({ id: 'sql', label: 'SQL' });
             if (hasAssumptions) tabs.push({ id: 'assumptions', label: 'Assumptions' }); // Add Assumptions tab
 
             // Handle case where only summary exists (and maybe assumptions)
-            if (hasSummary && !plotlyInfo && !data.data_table_html && !data.sql_query && !hasAssumptions) {
+            // Corrected condition to use hasPlotlyJson
+            if (hasSummary && !hasPlotlyJson && !data.data_table_html && !data.sql_query && !hasAssumptions) {
                  tabs.push({ id: 'summary-only', label: 'Summary'});
             }
 
+            // Adjusted condition: Check hasPlotlyJson instead of plotlyInfo
             if (tabs.length === 0 && !hasSummary) {
                 const noDataP = document.createElement('p');
                 noDataP.textContent = data.data_summary || "Analysis complete, but no specific outputs generated.";
                 noDataP.classList.add('text-sm', 'text-gray-700');
-                return { element: noDataP, plotlyInfo: null }; // Return null for plotlyInfo
+                // Return null for plotlyJson instead of plotlyInfo
+                return { element: noDataP, plotlyJson: null };
             }
 
             tabs.forEach((tab, index) => {
@@ -256,10 +203,10 @@
                     const chartContainer = document.createElement('div');
                     chartContainer.classList.add('visualization-container', 'bg-white', 'p-1', 'rounded-md', 'border', 'border-gray-200', 'min-h-[400px]', 'flex', 'items-center', 'justify-center');
                     const chartDiv = document.createElement('div');
-                    chartDiv.id = plotlyInfo.divId; // Use the extracted ID
+                    // We will assign a unique ID later when rendering, just add class for now
                     chartDiv.classList.add('plotly-graph-div');
-                    chartDiv.style.height = '100%';
-                    chartDiv.style.width = '100%';
+                    chartDiv.style.height = '100%'; // Adjust as needed, maybe set later
+                    chartDiv.style.width = '100%'; // Adjust as needed, maybe set later
                     chartContainer.appendChild(chartDiv);
                     content.appendChild(chartContainer); // Add chart container first
 
@@ -332,14 +279,16 @@
                     content.classList.add('active');
                     // Attempt to resize Plotly chart if it's the chart tab and already rendered
                     if (tab.id === 'chart') {
-                        const chartDiv = content.querySelector(`#${plotlyInfo.divId}`);
+                        // Find the chart div by class within the active content pane
+                        const chartDiv = content.querySelector('.plotly-graph-div');
                         // Check if the plot exists by looking for a specific class Plotly adds
                         if (chartDiv && chartDiv.classList.contains('js-plotly-plot') && typeof Plotly !== 'undefined') {
                              try {
-                                 console.log("Resizing existing Plotly chart:", plotlyInfo.divId); // DEBUG
+                                 console.log("Resizing existing Plotly chart:", chartDiv.id); // DEBUG
                                  setTimeout(() => Plotly.Plots.resize(chartDiv), 0);
                              } catch (e) { console.warn("Plotly resize failed:", e); }
                         } else {
+                             // This might happen if the tab is clicked before the chart renders
                              console.log("Chart not yet rendered or Plotly library missing on resize attempt."); // DEBUG
                         }
                     }
@@ -348,8 +297,8 @@
 
             tabContainer.appendChild(tabButtons);
             tabContainer.appendChild(tabContentContainer);
-            // Return the container element AND the extracted plotly info
-            return { element: tabContainer, plotlyInfo: plotlyInfo };
+            // Return the container element AND the raw plotly JSON string
+            return { element: tabContainer, plotlyJson: data.visualization_json }; // Return raw JSON string
         }
 
 
@@ -399,27 +348,33 @@
                     if (tabResult && tabResult.element) {
                         const agentBubble = addMessageBubble('Agent', tabResult.element); // Add bubble with tab container
 
-                        // If plotly info exists, try to render the chart AFTER the bubble is in the DOM
-                        if (tabResult.plotlyInfo) {
+                        // If plotly JSON exists, parse and render the chart AFTER the bubble is in the DOM
+                        if (tabResult.plotlyJson) {
                             // Use setTimeout to allow DOM update before finding the div
                             setTimeout(() => {
-                                const chartDiv = agentBubble.querySelector(`#${tabResult.plotlyInfo.divId}`);
+                                // Find the placeholder div within the newly added bubble/tabs
+                                const chartDiv = agentBubble.querySelector('.plotly-graph-div');
                                 if (chartDiv && typeof Plotly !== 'undefined') {
                                     try {
-                                        console.log("Attempting Plotly.newPlot for:", tabResult.plotlyInfo.divId); // DEBUG
+                                        const figureSpec = JSON.parse(tabResult.plotlyJson);
+                                        // Generate a unique ID for this specific chart instance
+                                        const uniqueChartId = `plotly-chart-${messageCounter}-${Date.now()}`;
+                                        chartDiv.id = uniqueChartId; // Assign the unique ID
+
+                                        console.log("Attempting Plotly.newPlot for:", uniqueChartId); // DEBUG
                                         Plotly.newPlot(
-                                            tabResult.plotlyInfo.divId,
-                                            tabResult.plotlyInfo.data,
-                                            tabResult.plotlyInfo.layout,
-                                            tabResult.plotlyInfo.config
+                                            uniqueChartId,
+                                            figureSpec.data,
+                                            figureSpec.layout,
+                                            figureSpec.config || {"responsive": true} // Use parsed config or default
                                         );
-                                        console.log("Plotly.newPlot called successfully."); // DEBUG
+                                        console.log("Plotly.newPlot called successfully using JSON spec."); // DEBUG
                                     } catch (e) {
-                                        console.error("Plotly.newPlot failed:", e);
-                                        chartDiv.innerHTML = `<p class="text-red-600">Error rendering chart: ${e.message}</p>`;
+                                        console.error("Failed to parse Plotly JSON or render chart:", e);
+                                        chartDiv.innerHTML = `<p class="text-red-600">Error parsing or rendering chart: ${e.message}</p>`;
                                     }
                                 } else if (!chartDiv) {
-                                     console.error("Chart div with ID not found after adding message:", tabResult.plotlyInfo.divId);
+                                     console.error("Chart placeholder div (.plotly-graph-div) not found after adding message.");
                                 } else {
                                      console.error("Plotly library not loaded.");
                                 }

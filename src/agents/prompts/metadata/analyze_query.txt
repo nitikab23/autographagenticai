@@ -28,7 +28,12 @@ Follow these steps meticulously to construct the JSON output, relying strictly o
     *   Identify ambiguities or underspecified aspects where the interpretation **significantly impacts** the resulting data or query structure (e.g., choice between multiple relevant date columns, definition of a core non-standard metric, conflicting requirements).
     *   For each ambiguity, determine a sensible `suggestion` as a default or recommended approach based on general principles or the provided context (e.g., suggest `COUNT(*)` for a simple count, propose a specific join type based on inference, suggest using a specific timestamp column if multiple exist). Clearly state the assumption behind the suggestion internally during your reasoning.
     *   **Directly apply the chosen `suggestion`** to resolve the ambiguity within the generated plan details (tables, columns, joins, filters, etc.). Do NOT formulate a question to the user.
-    *   **Record Assumption:** For each ambiguity resolved using a suggestion, add a clear, concise, human-readable string describing the assumption made to the `assumptions_made` list in the final JSON output (e.g., "Assumed `order_date` should be used for time analysis", "Assumed an INNER JOIN between users and orders", "Used COUNT(*) for 'number of records'").
+    *   **Record Assumption:** For each ambiguity resolved using a suggestion, add a clear, concise string describing the assumption made to the `assumptions_made` list in the final JSON output. **Phrase this assumption in simple business terms understandable by a non-technical user.** Avoid technical jargon like specific SQL functions, join types, or raw column names unless absolutely necessary for clarity.
+        *   *Good Example:* "Assumed 'revenue' means the sum of order totals."
+        *   *Good Example:* "Showing results based on the `order date`."
+        *   *Good Example:* "Included only customers who also placed an order."
+        *   *Less Ideal Example:* "Used SUM(schema.table.price) for revenue."
+        *   *Less Ideal Example:* "Applied an INNER JOIN between users and orders."
 
 4.  **Infer Efficient Join Strategy:**
     *   Based on column naming conventions observed in the `Metadata Context` (e.g., matching names like `*_id`, `*_key`), sample data patterns, or the semantic meaning derived from the `Query`, propose the necessary joins (`initial_joins`) between the `initial_tables`.
@@ -37,7 +42,7 @@ Follow these steps meticulously to construct the JSON output, relying strictly o
         *   Identify the primary entity. If the query asks for a complete view of this entity plus related optional data, use `LEFT JOIN`.
         *   Consider data characteristics: If one side of the join is known to be much smaller and serves as a filter/lookup, structure the join accordingly (though the spec focuses on logical structure, not physical execution order).
     *   Specify each join precisely: `left_table`, `left_column`, `right_table`, `right_column` and the inferred `type`. Use FULLY QUALIFIED NAMES for tables and SHORT NAMES for columns in initial_joins
-    *  **Handle Join Ambiguity:** If multiple plausible join types exist, apply the most likely one based on phrasing ("all X" -> LEFT, "X with Y" -> INNER) or default to INNER JOIN if unclear, and record this choice in `assumptions_made`.
+    *  **Handle Join Ambiguity:** If multiple plausible join types exist, apply the most likely one based on phrasing ("all X" -> LEFT, "X with Y" -> INNER) or default to INNER JOIN if unclear. **Record the business implication of the chosen join in `assumptions_made`** (e.g., "Only showing customers who have placed orders" for INNER, "Showing all customers, including those without orders" for LEFT).
     *   *Rationale: Correct join type avoids data loss and ensures semantic accuracy.*
 
 5.  **Define Initial Filters (WHERE Clause - Apply Early):**

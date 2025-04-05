@@ -2,6 +2,7 @@ import pandas as pd
 # import matplotlib.pyplot as plt # Removed
 # import seaborn as sns # Removed
 import plotly.express as px # Added
+import plotly.io as pio # Add plotly.io for JSON export
 import os
 import re # Added for parsing LLM response
 import io # Added for capturing df.info() output
@@ -144,15 +145,20 @@ class VisualizationAgent(Agent):
                  # Execute the code which should define 'fig' in exec_globals
                  exec(generated_code, exec_globals)
 
-                 # Check if 'fig' was created and generate HTML string
-                 visualization_html = None # Initialize
+                 # Check if 'fig' was created and generate JSON spec string
+                 visualization_json = None # Initialize
                  if 'fig' in exec_globals:
                      fig = exec_globals['fig']
-                     # Generate HTML string for embedding, include Plotly.js from CDN
-                     # Generate a valid ID prefixed for CSS compatibility
-                     valid_div_id = f"plotly-div-{uuid.uuid4()}"
-                     visualization_html = fig.to_html(full_html=False, include_plotlyjs='cdn', div_id=valid_div_id)
-                     self.logger.info(f"Generated Plotly HTML string with ID: {valid_div_id}")
+                     # Generate JSON string representation of the figure
+                     try:
+                         visualization_json = pio.to_json(fig)
+                         self.logger.info("Generated Plotly JSON specification string.")
+                         self.logger.debug(f"Plotly JSON: {visualization_json[:500]}...") # Log snippet
+                     except Exception as json_err:
+                         self.logger.error(f"Failed to convert Plotly figure to JSON: {json_err}", exc_info=True)
+                         # Decide how to handle - maybe return error or proceed without viz?
+                         # For now, let's return an error step if JSON conversion fails
+                         return ReasoningStep(agent="VisualizationAgent", operation="error", details={"error": f"Failed to generate Plotly JSON: {json_err}", "generated_code": generated_code})
                  else:
                      error_msg = "LLM generated code did not define a 'fig' variable."
                      self.logger.error(error_msg)
@@ -171,10 +177,9 @@ class VisualizationAgent(Agent):
                 operation="visualization_generated",
                 details={
                     "input_data_path": query_result_path,
-                    "visualization_html": visualization_html, # Add HTML string
+                    "visualization_json": visualization_json, # Add JSON string instead of HTML
                     "visualization_summary": visualization_summary, # Add summary string
                     "executed_code": generated_code # Include for debugging/transparency
-                    # Removed output_html_path
                 }
             )
             self._log_step(result)
