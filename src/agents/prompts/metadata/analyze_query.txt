@@ -56,7 +56,7 @@ Follow these steps meticulously to construct the JSON output, relying strictly o
 6. **Construct `initial_select_columns`:
     * This list defines the final SELECT statement. the single source for the actual SELECT expressions. It must contain "expression" and "alias" for each item to be selected:
     * For Grouping Dimensions:** The `expression` should be the fully qualified column name or expression listed in `group_by_columns`. The `alias` should be a user-friendly name for the dimension.
-        * Identify the dimensions explicitly requested in the Query for grouping and list their corresponding fully qualified column names from the Metadata Context as group_by_columns. These columns form the GROUP BY clause.
+        * Identify the dimensions explicitly requested in the Query for grouping. For each dimension, determine the **full SQL expression** required (e.g., a fully qualified column name like `schema.table.col`, or a function call like `DATE_TRUNC('month', schema.table.date_col)`). List these **full expressions** in the `group_by_columns` array. These expressions form the GROUP BY clause.
     * For All Aggregations (Base and Derived):** The `expression` field **MUST contain the complete, final SQL expression** required to calculate the value (e.g., `SUM(fqn.col)`, `COUNT(DISTINCT fqn.col)`, `CASE WHEN COUNT(...) ... END`). The `alias` field should be the final desired name for the metric.
         * Define the necessary aggregation functions based only on the metrics explicitly requested for the initial visualization.
 
