@@ -150,14 +150,27 @@ class ExtractorAgent(Agent):
 
 
         # --- Generate ORDER BY clause ---
-        # (Your existing logic for ORDER BY is fine)
-        order_by_spec = metadata.get("order_by_spec")
+        order_by_spec_list = metadata.get("order_by_spec") # Get the potential list
         order_by_clause = ""
-        if order_by_spec and isinstance(order_by_spec, dict) and order_by_spec.get("column"):
-             column = order_by_spec["column"]
-             direction = order_by_spec.get("direction", "ASC").upper()
-             if direction not in ["ASC", "DESC"]: direction = "ASC"
-             order_by_clause = f"ORDER BY {column} {direction}"
+        sort_terms = [] # List to hold individual "column direction" strings
+
+        # Check if it's a non-empty list
+        if order_by_spec_list and isinstance(order_by_spec_list, list):
+            for spec in order_by_spec_list:
+                # Validate each item in the list
+                if isinstance(spec, dict) and spec.get("column"):
+                    column = spec["column"]
+                    direction = spec.get("direction", "ASC").upper()
+                    if direction not in ["ASC", "DESC"]:
+                        direction = "ASC"
+                    sort_terms.append(f"{column} {direction}")
+                else:
+                    self.logger.warning(f"Skipping invalid item in order_by_spec list: {spec}")
+
+        # If we found valid sort terms, construct the clause
+        if sort_terms:
+            order_by_clause = f"ORDER BY {', '.join(sort_terms)}"
+
         self.logger.debug(f"ORDER BY clause: {order_by_clause}")
 
 

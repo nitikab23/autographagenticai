@@ -60,7 +60,15 @@ Follow these steps meticulously to construct the JSON output, relying strictly o
 
 7.  **Determine Sorting Requirements (ORDER BY):**
     *   Analyze the `Query` for explicit or strongly implied sorting needs (e.g., "order by", "sort by", "top N", "bottom N", "highest", "lowest"). Sorting applies *after* aggregation.
-    *   If sorting is required, specify the `order_by_spec` with the `column` (use the aggregation `alias` if sorting by a metric, otherwise the fully qualified dimension column name from the metadata) and `direction` (`ASC` or `DESC`). Default to `DESC` for "top N"/"highest" and `ASC` for "bottom N"/"lowest", otherwise default to `ASC` if unspecified.
+    *   If no explicit sorting is mentioned, but the query implies a specific order (e.g., "top N" without "order by"), infer the sorting based on the query's intent.
+    *   If sorting is required based on the above analysis (explicit or implied), specify the `order_by_spec` with the `column` (use the aggregation `alias` if sorting by a metric, otherwise the fully qualified dimension column name from the metadata) and `direction` (`ASC` or `DESC`). Default to `DESC` for "top N"/"highest" and `ASC` for "bottom N"/"lowest", otherwise default to `ASC` if unspecified.
+    *   **If NO explicit or strongly implied sorting is found based on the above analysis:**
+        *   **Apply Default Sorting:** Determine the most sensible default sorting order...
+        *   **Priority 1: Primary Time Dimension:** If the `group_by_columns` include a primary date or timestamp column..., sort by that column `ASC` by default. **THEN, identify the primary categorical dimension (if any) from `group_by_columns` (like a name, category, etc.) and add it as a secondary sort key, also `ASC`.**
+        *   **Priority 2: Primary Categorical Dimension:** If there's no time dimension but there is a clear primary categorical dimension..., sort by that dimension column `ASC` by default. **If there's a secondary dimension or a primary metric, consider adding it as a secondary sort key (`ASC` for dimensions, `DESC` for metrics usually).**
+        *   **Priority 3: First Metric:** If neither of the above applies..., sort by the first metric ... `DESC` by default. **If there's a secondary metric, consider adding it as a secondary sort key (`ASC` or `DESC` depending on context).**
+        *   If default sorting is applied..., specify the `order_by_spec` accordingly, **listing both primary and secondary sort keys (e.g., `ORDER BY date_col ASC, category_col ASC`)**.
+        *   *Rationale: Default sorting ensures a logical presentation of data.*
 
 8.  **Determine Limit Requirements (LIMIT):**
     *   Identify if the `Query` requests a specific number of rows (e.g., "top 10", "limit 5"). This usually accompanies sorting.

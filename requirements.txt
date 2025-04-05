@@ -19,7 +19,7 @@ google-genai==1.8.0
 # Data Processing
 pandas==2.2.3  # Latest, minor updates
 numpy==1.26.4  # Latest, aligns with pandas
-plotly==5.17.0 # Added for interactive plotting
+plotly==5.22.0 # Updated Plotly version (Attempting to fix to_html bug)
 
 # Development and Testing
 pytest==8.3.3  # Latest, minor updates
