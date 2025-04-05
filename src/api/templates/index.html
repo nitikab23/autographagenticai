@@ -212,19 +212,20 @@
             const tabs = [];
             const plotlyInfo = extractPlotlyData(data.visualization_html); // Extract info first
             const hasSummary = !!data.visualization_summary; // Check if summary exists
+            const hasAssumptions = data.assumptions && Array.isArray(data.assumptions) && data.assumptions.length > 0; // Check for assumptions
 
-            // Determine tabs needed - Summary is handled differently now
-            // if (hasSummary) tabs.push({ id: 'summary', label: 'Summary' }); // REMOVED Summary tab
-            if (plotlyInfo) tabs.push({ id: 'chart', label: 'Chart' }); // Add chart tab only if info was extracted
+            // Determine tabs needed
+            if (plotlyInfo) tabs.push({ id: 'chart', label: 'Chart' });
             if (data.data_table_html) tabs.push({ id: 'data', label: 'Data' });
             if (data.sql_query) tabs.push({ id: 'sql', label: 'SQL' });
+            if (hasAssumptions) tabs.push({ id: 'assumptions', label: 'Assumptions' }); // Add Assumptions tab
 
-            // If only a summary exists (no chart, data, or sql), add it as the only content
-            if (hasSummary && !plotlyInfo && !data.data_table_html && !data.sql_query) {
+            // Handle case where only summary exists (and maybe assumptions)
+            if (hasSummary && !plotlyInfo && !data.data_table_html && !data.sql_query && !hasAssumptions) {
                  tabs.push({ id: 'summary-only', label: 'Summary'});
             }
 
-            if (tabs.length === 0 && !hasSummary) { // Adjusted condition
+            if (tabs.length === 0 && !hasSummary) {
                 const noDataP = document.createElement('p');
                 noDataP.textContent = data.data_summary || "Analysis complete, but no specific outputs generated.";
                 noDataP.classList.add('text-sm', 'text-gray-700');
@@ -271,6 +272,15 @@
                     }
                 } else if (tab.id === 'summary-only') { // Handle case where only summary exists
                      content.innerHTML = `<p class="text-sm text-gray-700">${escapeHtml(data.visualization_summary)}</p>`;
+                } else if (tab.id === 'assumptions') {
+                    const assumptionsList = document.createElement('ul');
+                    assumptionsList.classList.add('list-disc', 'list-inside', 'space-y-1', 'text-sm', 'text-gray-700');
+                    data.assumptions.forEach(assumption => {
+                        const listItem = document.createElement('li');
+                        listItem.textContent = assumption;
+                        assumptionsList.appendChild(listItem);
+                    });
+                    content.appendChild(assumptionsList);
                 } else if (tab.id === 'data') {
                     // Add a container for scrollability and the button
                     const dataContainer = document.createElement('div');
@@ -351,11 +361,11 @@
             if (submitButton) submitButton.disabled = true;
             if (clarificationSubmitButton) clarificationSubmitButton.disabled = true;
             clarificationSection.style.display = 'none';
-            clarificationInputsDiv.innerHTML = '';
+            // clarificationInputsDiv.innerHTML = ''; // No longer needed
 
             showLoadingIndicator();
 
-            if (!clarifications) {
+            if (!clarifications) { // This check might still be relevant if we re-introduce clarifications later
                 currentQuery = queryText;
                 currentProjectId = projectId;
             }
@@ -420,36 +430,12 @@
                     }
 
                 }
-                // Handle Clarifications
-                else if (data.status === 'clarification_needed' && data.clarifications && data.clarifications.length > 0) {
-                     clarificationInputsDiv.innerHTML = '';
-                     data.clarifications.forEach((ambiguity, index) => {
-                         const question = ambiguity.question || `Clarification ${index + 1}`;
-                         const suggestion = ambiguity.suggestion || '';
-                         const itemDiv = document.createElement('div');
-                         const label = document.createElement('label');
-                         label.htmlFor = `clarification-${index}`;
-                         label.className = "block text-sm font-medium text-gray-700 mb-1";
-                         label.textContent = question;
-
-                         const textarea = document.createElement('textarea');
-                         textarea.id = `clarification-${index}`;
-                         textarea.name = question;
-                         textarea.rows = "2";
-                         textarea.className = "block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm";
-                         textarea.placeholder = `Suggested: ${suggestion}`;
-                         textarea.value = suggestion;
-
-                         itemDiv.appendChild(label);
-                         itemDiv.appendChild(textarea);
-                         clarificationInputsDiv.appendChild(itemDiv);
-                    });
-                    clarificationSection.style.display = 'block';
-                }
-                // Handle Errors
+                // Handle Errors (Keep this part)
                  else if (data.status === 'error' && data.error_message) {
                      addMessageBubble('Agent', `Error: ${escapeHtml(data.error_message)}`);
-                 } else {
+                 }
+                 // Removed clarification_needed block
+                 else if (data.status !== 'success') { // Catch other non-success statuses
                      addMessageBubble('Agent', 'Received an unexpected response or no output generated.');
                  }
 
@@ -491,19 +477,8 @@
             handleAnalysisRequest(projectId, queryText, null);
         });
 
-        // Clarification submission
-        clarificationForm.addEventListener('submit', (event) => {
-            event.preventDefault();
-            const answers = {};
-            const answerTextareas = clarificationInputsDiv.querySelectorAll('textarea');
-            answerTextareas.forEach(textarea => {
-                if (textarea.name) {
-                    answers[textarea.name] = textarea.value;
-                }
-            });
-            addMessageBubble('User', 'Provided clarifications:\n' + JSON.stringify(answers, null, 2));
-            handleAnalysisRequest(currentProjectId, currentQuery, answers);
-        });
+        // Clarification submission - REMOVED
+        // clarificationForm.addEventListener('submit', (event) => { ... });
 
         // Auto-resize textarea
         queryTextarea.addEventListener('input', () => {

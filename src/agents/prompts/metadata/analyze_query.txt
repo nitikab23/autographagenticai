@@ -24,11 +24,11 @@ Follow these steps meticulously to construct the JSON output, relying strictly o
     *   For each required column, note its fully qualified `name`, `type`, and `nullable` status as specified in the `Metadata Context`.
     *   *Rationale: Minimizing columns reduces I/O and processing.*
 
-3.  **Detect Ambiguities & Propose Resolutions:**
+3.  **Detect Ambiguities, Apply Suggestions, and Record Assumptions:**
     *   Identify ambiguities or underspecified aspects where the interpretation **significantly impacts** the resulting data or query structure (e.g., choice between multiple relevant date columns, definition of a core non-standard metric, conflicting requirements).
-    *   For each ambiguity, formulate a concise `question` to ask the user for clarification.
-    *   Provide a sensible `suggestion` as a default or recommended approach based on general principles or the provided context (e.g., suggest `COUNT(*)` for a simple count, propose a specific join type based on inference, suggest using a specific timestamp column if multiple exist). Clearly state the assumption behind the suggestion.
-    *   Use `User Clarifications` to resolve ambiguities identified here or previously.
+    *   For each ambiguity, determine a sensible `suggestion` as a default or recommended approach based on general principles or the provided context (e.g., suggest `COUNT(*)` for a simple count, propose a specific join type based on inference, suggest using a specific timestamp column if multiple exist). Clearly state the assumption behind the suggestion internally during your reasoning.
+    *   **Directly apply the chosen `suggestion`** to resolve the ambiguity within the generated plan details (tables, columns, joins, filters, etc.). Do NOT formulate a question to the user.
+    *   **Record Assumption:** For each ambiguity resolved using a suggestion, add a clear, concise, human-readable string describing the assumption made to the `assumptions_made` list in the final JSON output (e.g., "Assumed `order_date` should be used for time analysis", "Assumed an INNER JOIN between users and orders", "Used COUNT(*) for 'number of records'").
 
 4.  **Infer Efficient Join Strategy:**
     *   Based on column naming conventions observed in the `Metadata Context` (e.g., matching names like `*_id`, `*_key`), sample data patterns, or the semantic meaning derived from the `Query`, propose the necessary joins (`initial_joins`) between the `initial_tables`.
@@ -37,10 +37,7 @@ Follow these steps meticulously to construct the JSON output, relying strictly o
         *   Identify the primary entity. If the query asks for a complete view of this entity plus related optional data, use `LEFT JOIN`.
         *   Consider data characteristics: If one side of the join is known to be much smaller and serves as a filter/lookup, structure the join accordingly (though the spec focuses on logical structure, not physical execution order).
     *   Specify each join precisely: `left_table`, `left_column`, `right_table`, `right_column` and the inferred `type`. Use FULLY QUALIFIED NAMES for tables and SHORT NAMES for columns in initial_joins
-    *  **Handle Join Ambiguity:** Only flag join type as an `ambiguity` requiring a question if:
-        *   There is a clear contradiction in the query regarding inclusion/exclusion.
-        *   Multiple, equally plausible join paths exist between necessary tables with no clear primary route inferable from context or naming.
-        *   The choice between `INNER` and `LEFT` significantly changes the core interpretation of the query's main goal, and explicit phrasing is absent.
+    *  **Handle Join Ambiguity:** If multiple plausible join types exist, apply the most likely one based on phrasing ("all X" -> LEFT, "X with Y" -> INNER) or default to INNER JOIN if unclear, and record this choice in `assumptions_made`.
     *   *Rationale: Correct join type avoids data loss and ensures semantic accuracy.*
 
 5.  **Define Initial Filters (WHERE Clause - Apply Early):**
@@ -80,8 +77,8 @@ Follow these steps meticulously to construct the JSON output, relying strictly o
     *   List these `having_conditions`, using the aggregation `alias` defined in step 6 in the condition string (e.g., `"total_value > 1000"`, `"distinct_identifier_count < 5"`).
     *   *Rationale: Filters results based on aggregated values.*
 
-10. **Incorporate Context & Clarifications:**
-    *   **CRITICAL:** Review the provided `User Clarifications`. If clarifications exist, you **MUST** modify the plan details generated in the previous steps (tables, columns, joins, filters, aggregations, grouping, etc.) to adhere to the user's confirmed choices or provided answers. Do not simply repeat your initial suggestion if the user confirmed it; ensure the *entire plan* reflects the clarified understanding based on the provided `Metadata Context`, maintaining the focus on initial query.
+10. **Incorporate Prior Context:**
+    *   Review the `Prior Context` if provided. Ensure the current plan is consistent with any relevant information or decisions from previous interactions in the conversation, if applicable. (Note: The primary flow no longer involves asking for `User Clarifications` within a single query analysis).
 
 **Output:**
 
@@ -143,11 +140,9 @@ EXAMPLE_START
 "having_conditions": [
 {{ "condition": "value > 5000" }}
 ],
-"ambiguities": [
-{{
-"question": "question",
-"suggestion": "suggestion"
-}}
+"assumptions_made": [
+"Assumed 'total sales' refers to SUM(schema_name.table_name2.metric_col).",
+"Used INNER JOIN between table_name1 and table_name2 based on matching key columns."
 ]
 }}
 EXAMPLE_END

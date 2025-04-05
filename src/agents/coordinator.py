@@ -49,28 +49,22 @@ class CoordinatorAgent(Agent):
             # --- ANALYZE Phase Result Handling ---
             if self.workflow_state == "ANALYZE":
                 if result.operation == "metadata_analysis":
-                    ambiguities = result.details.get("ambiguities", [])
-                    unresolved = [amb for amb in ambiguities if amb["question"] not in self.context.get("clarifications", {})]
-                    if unresolved:
-                        # If unresolved ambiguities, stop and ask for clarification
-                        return ReasoningStep(
-                            agent="Coordinator",
-                            operation="clarification_needed",
-                            details={"ambiguities": unresolved}
-                        )
-                    else:
-                        # If resolved or no ambiguities, update context and move to EXTRACT
-                        self.workflow_state = "EXTRACT"
-                        self.context = self.context.update({
-                            "metadata": result.details, # Store the full analysis plan
-                            "workflow_state": self.workflow_state
-                        })
-                        self._log_step(ReasoningStep(
-                            agent="Coordinator", operation="state_transition",
-                            details={"new_state": self.workflow_state, "reason": "Analysis complete."}
-                        ))
-                        # Immediately proceed to the next step in the same execution cycle
-                        return await self.execute() # Re-call execute to run EXTRACT phase
+                    # Directly proceed, assuming MetadataAgent applied suggestions
+                    metadata_plan = result.details
+                    assumptions_list = metadata_plan.get("assumptions_made", []) # Extract assumptions
+
+                    self.workflow_state = "EXTRACT"
+                    self.context = self.context.update({
+                        "metadata": metadata_plan, # Store the full analysis plan
+                        "assumptions": assumptions_list, # Store the assumptions made
+                        "workflow_state": self.workflow_state
+                    })
+                    self._log_step(ReasoningStep(
+                        agent="Coordinator", operation="state_transition",
+                        details={"new_state": self.workflow_state, "reason": "Analysis complete, proceeding with assumptions."}
+                    ))
+                    # Immediately proceed to the next step in the same execution cycle
+                    return await self.execute() # Re-call execute to run EXTRACT phase
                 elif result.operation == "error":
                     return result # Propagate error
 

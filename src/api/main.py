@@ -337,7 +337,8 @@ async def analyze_query(
             "data_table_html": data_table_html, # Add HTML table
             "visualization_html": visualization_html,
             "visualization_summary": visualization_summary, # Add summary to response
-            "clarifications": None,
+            "assumptions": final_context.get("assumptions", []), # Add assumptions list
+            "clarifications": None, # Keep this null as we removed the clarification step
             "error_message": None
         }
     except Exception as e:
@@ -351,6 +352,7 @@ async def analyze_query(
             "data_table_html": None, # Add table field to error response
             "visualization_html": None,
             "visualization_summary": None, # Add summary field to error response
+            "assumptions": None, # Add assumptions field to error response
             "clarifications": None,
             "error_message": str(e)
         }
